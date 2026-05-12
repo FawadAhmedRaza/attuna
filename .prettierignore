@@ -1,0 +1,20 @@
+node_modules
+.pnpm-store
+.turbo
+.next
+out
+dist
+build
+coverage
+.expo
+cdk.out
+
+# Generated
+pnpm-lock.yaml
+*.tsbuildinfo
+next-env.d.ts
+
+# Docs (authored prose — preserve as-written)
+docs/**
+README.md
+CLAUDE.md

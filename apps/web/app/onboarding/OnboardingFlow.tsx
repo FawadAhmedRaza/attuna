@@ -1,0 +1,601 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Brain,
+  Building2,
+  Check,
+  Heart,
+  Mail,
+  Send,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+
+import { Eyebrow } from "@attuna/ui/Eyebrow";
+import { Field } from "@attuna/ui/Field";
+import { Input } from "@attuna/ui/Input";
+import { PillButton } from "@attuna/ui/PillButton";
+
+const STORAGE_KEY = "attuna_onboarding_v1";
+const TOTAL_STEPS = 6; // 0..5 inclusive
+
+type PracticeType = "" | "solo" | "group" | "clinic" | "training";
+type ClientBand = "" | "1-10" | "11-25" | "26-50" | "50+";
+
+type OnboardingData = {
+  practice: string;
+  license: string;
+  practice_type: PracticeType;
+  client_count: ClientBand;
+  specialty: string[];
+  priorities: string[];
+  invite: string;
+};
+
+const DEFAULT_DATA: OnboardingData = {
+  practice: "",
+  license: "",
+  practice_type: "",
+  client_count: "",
+  specialty: [],
+  priorities: ["emotional"],
+  invite: "",
+};
+
+const PRACTICE_TYPES: { id: Exclude<PracticeType, "">; label: string }[] = [
+  { id: "solo", label: "Solo private practice" },
+  { id: "group", label: "Group practice" },
+  { id: "clinic", label: "Multi-clinician clinic" },
+  { id: "training", label: "Training program" },
+];
+
+const CLIENT_BANDS: Exclude<ClientBand, "">[] = ["1-10", "11-25", "26-50", "50+"];
+
+const SPECIALTIES = [
+  "Anxiety",
+  "Depression",
+  "Trauma",
+  "Couples",
+  "Adolescents",
+  "Grief",
+  "Identity",
+  "Substance use",
+  "OCD",
+  "Eating concerns",
+  "Family",
+  "ADHD",
+];
+
+const INSIGHT_AREAS: { id: string; icon: LucideIcon; label: string; required?: boolean }[] = [
+  { id: "emotional", icon: Heart, label: "Emotional", required: true },
+  { id: "cognitive", icon: Brain, label: "Cognitive" },
+  { id: "behavioral", icon: Target, label: "Behavioral" },
+  { id: "avoidance", icon: AlertCircle, label: "Avoidance" },
+  { id: "narrative", icon: BookOpen, label: "Narrative" },
+  { id: "progress", icon: TrendingUp, label: "Progress" },
+];
+
+function loadData(): OnboardingData {
+  if (typeof window === "undefined") return DEFAULT_DATA;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_DATA;
+    const parsed = JSON.parse(raw) as Partial<OnboardingData>;
+    return { ...DEFAULT_DATA, ...parsed };
+  } catch {
+    return DEFAULT_DATA;
+  }
+}
+
+function saveData(data: OnboardingData) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Quota or private mode — fall through; data lost on refresh.
+  }
+}
+
+export function OnboardingFlow() {
+  const router = useRouter();
+  const [step, setStep] = useState(0);
+  const [data, setData] = useState<OnboardingData>(DEFAULT_DATA);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setData(loadData());
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (hydrated) saveData(data);
+  }, [data, hydrated]);
+
+  const update = <K extends keyof OnboardingData>(key: K, value: OnboardingData[K]) =>
+    setData((d) => ({ ...d, [key]: value }));
+
+  const toggleArr = (key: "specialty" | "priorities", value: string) =>
+    setData((d) => ({
+      ...d,
+      [key]: d[key].includes(value) ? d[key].filter((x) => x !== value) : [...d[key], value],
+    }));
+
+  const finish = () => {
+    // Phase 2: localStorage only. Phase 3 will POST this to the API.
+    saveData(data);
+    router.push("/today");
+  };
+
+  return (
+    <div className="w-full">
+      {step > 0 && step < TOTAL_STEPS - 1 ? (
+        <ProgressHeader step={step} total={TOTAL_STEPS - 1} onBack={() => setStep((s) => s - 1)} />
+      ) : null}
+
+      <div className="fade-in" key={step}>
+        {step === 0 && <StepWelcome onNext={() => setStep(1)} />}
+        {step === 1 && <StepPractice data={data} update={update} onNext={() => setStep(2)} />}
+        {step === 2 && (
+          <StepSpecialties
+            data={data}
+            toggle={(s) => toggleArr("specialty", s)}
+            onNext={() => setStep(3)}
+          />
+        )}
+        {step === 3 && (
+          <StepPriorities
+            data={data}
+            toggle={(p) => toggleArr("priorities", p)}
+            onNext={() => setStep(4)}
+          />
+        )}
+        {step === 4 && (
+          <StepInvite
+            data={data}
+            update={(v) => update("invite", v)}
+            onSkip={() => setStep(5)}
+            onSend={() => setStep(5)}
+          />
+        )}
+        {step === 5 && <StepDone onOpen={finish} />}
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Sub-components — kept colocated since they aren't reused elsewhere.
+// ────────────────────────────────────────────────────────────────────
+
+function ProgressHeader({
+  step,
+  total,
+  onBack,
+}: {
+  step: number;
+  total: number;
+  onBack: () => void;
+}) {
+  const pct = (step / total) * 100;
+  return (
+    <div className="mb-8">
+      <div className="mb-2.5 flex items-center justify-between">
+        <span className="text-ink-mute text-[12px] font-medium">
+          Step {step} of {total}
+        </span>
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-accent inline-flex items-center gap-1 text-[12px] font-semibold hover:underline"
+        >
+          <ArrowLeft size={11} strokeWidth={1.75} /> Back
+        </button>
+      </div>
+      <div className="bg-surface-deep h-1 overflow-hidden rounded-full">
+        <div
+          className="bg-accent ease-attuna h-full rounded-full transition-[width] duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function OnboardCard({
+  centered = false,
+  children,
+}: {
+  centered?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={[
+        "bg-surface border-border rounded-[24px] border p-8 md:p-11",
+        centered ? "text-center" : "",
+      ].join(" ")}
+    >
+      {children}
+    </div>
+  );
+}
+
+function StepWelcome({ onNext }: { onNext: () => void }) {
+  return (
+    <OnboardCard centered>
+      <div
+        className="bg-accent-bg mb-7 inline-flex items-center gap-2 rounded-full px-[18px] py-2"
+        style={{ border: "1px solid color-mix(in oklab, var(--accent) 30%, transparent)" }}
+      >
+        <span aria-hidden="true">✦</span>
+        <span className="text-accent text-[12px] font-semibold">You&apos;re verified</span>
+      </div>
+      <h1
+        className="display text-ink m-0 mb-4 text-[36px] font-medium md:text-[44px]"
+        style={{ letterSpacing: "-0.025em", lineHeight: 1.05 }}
+      >
+        Let&apos;s set up your
+        <br />
+        quiet workspace.
+      </h1>
+      <p
+        className="text-ink-soft tracking-body mx-auto mb-8 max-w-[420px] text-[15px]"
+        style={{ lineHeight: 1.65 }}
+      >
+        Three minutes. We&apos;ll learn about your practice, set your insight priorities, then
+        invite your first client.
+      </p>
+      <div className="mb-8 grid grid-cols-3 gap-3 text-left">
+        {[
+          { icon: Building2, label: "Your practice" },
+          { icon: Sparkles, label: "Priorities" },
+          { icon: Users, label: "First client" },
+        ].map((s) => {
+          const Icon = s.icon;
+          return (
+            <div
+              key={s.label}
+              className="bg-bg-soft border-border-soft rounded-[14px] border px-4 py-4"
+            >
+              <Icon size={15} strokeWidth={1.75} className="text-accent mb-2.5" />
+              <div className="text-ink tracking-body text-[13px] font-semibold">{s.label}</div>
+            </div>
+          );
+        })}
+      </div>
+      <PillButton variant="primary" size="md" onClick={onNext}>
+        Begin <ArrowRight size={15} strokeWidth={1.75} />
+      </PillButton>
+    </OnboardCard>
+  );
+}
+
+function StepEyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-3.5">
+      <Eyebrow flanked={false}>{children}</Eyebrow>
+    </div>
+  );
+}
+
+function StepHeading({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <>
+      <h2
+        className="display text-ink m-0 mb-2 text-[28px] font-medium md:text-[32px]"
+        style={{ letterSpacing: "-0.025em", lineHeight: 1.15 }}
+      >
+        {title}
+      </h2>
+      <p className="text-ink-soft mb-7 text-[14px] font-medium">{subtitle}</p>
+    </>
+  );
+}
+
+function ChoiceChip({
+  selected,
+  disabled = false,
+  className = "",
+  children,
+  onClick,
+}: {
+  selected: boolean;
+  disabled?: boolean;
+  className?: string;
+  children: React.ReactNode;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "rounded-[12px] border px-3.5 py-3 text-left text-[13px] font-medium transition-colors",
+        selected ? "bg-accent-bg border-accent text-accent" : "bg-bg-soft border-border text-ink",
+        disabled ? "cursor-default" : "cursor-pointer",
+        className,
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StepPractice({
+  data,
+  update,
+  onNext,
+}: {
+  data: OnboardingData;
+  update: <K extends keyof OnboardingData>(key: K, value: OnboardingData[K]) => void;
+  onNext: () => void;
+}) {
+  const canContinue = Boolean(data.practice && data.practice_type);
+  return (
+    <OnboardCard>
+      <StepEyebrow>Your practice</StepEyebrow>
+      <StepHeading
+        title="Tell us about your work."
+        subtitle="This helps us tailor what you see and how briefs are framed."
+      />
+      <div className="flex flex-col gap-5">
+        <Field label="Practice name" htmlFor="practice">
+          <Input
+            id="practice"
+            value={data.practice}
+            onChange={(e) => update("practice", e.target.value)}
+            placeholder="Karachi Therapy Collective"
+          />
+        </Field>
+        <Field label="License number" htmlFor="license" hint="For verification only">
+          <Input
+            id="license"
+            value={data.license}
+            onChange={(e) => update("license", e.target.value)}
+            placeholder="PCP-2847"
+          />
+        </Field>
+        <Field label="Practice type">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {PRACTICE_TYPES.map((p) => (
+              <ChoiceChip
+                key={p.id}
+                selected={data.practice_type === p.id}
+                onClick={() => update("practice_type", p.id)}
+              >
+                {p.label}
+              </ChoiceChip>
+            ))}
+          </div>
+        </Field>
+        <Field label="Active clients">
+          <div className="grid grid-cols-4 gap-2">
+            {CLIENT_BANDS.map((b) => (
+              <ChoiceChip
+                key={b}
+                selected={data.client_count === b}
+                onClick={() => update("client_count", b)}
+                className="text-center"
+              >
+                {b}
+              </ChoiceChip>
+            ))}
+          </div>
+        </Field>
+      </div>
+      <div className="mt-7">
+        <PillButton variant="primary" size="md" disabled={!canContinue} onClick={onNext}>
+          Continue <ArrowRight size={15} strokeWidth={1.75} />
+        </PillButton>
+      </div>
+    </OnboardCard>
+  );
+}
+
+function StepSpecialties({
+  data,
+  toggle,
+  onNext,
+}: {
+  data: OnboardingData;
+  toggle: (s: string) => void;
+  onNext: () => void;
+}) {
+  return (
+    <OnboardCard>
+      <StepEyebrow>Specialties</StepEyebrow>
+      <StepHeading title="What do you focus on?" subtitle="Pick all that apply." />
+      <div className="mb-7 flex flex-wrap gap-2">
+        {SPECIALTIES.map((s) => {
+          const selected = data.specialty.includes(s);
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => toggle(s)}
+              className={[
+                "inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-[13px] font-medium transition-colors",
+                selected
+                  ? "bg-accent-bg border-accent text-accent"
+                  : "border-border text-ink-soft bg-transparent",
+              ].join(" ")}
+            >
+              {selected ? <Check size={11} strokeWidth={2.5} /> : null}
+              {s}
+            </button>
+          );
+        })}
+      </div>
+      <PillButton variant="primary" size="md" onClick={onNext}>
+        Continue <ArrowRight size={15} strokeWidth={1.75} />
+      </PillButton>
+    </OnboardCard>
+  );
+}
+
+function StepPriorities({
+  data,
+  toggle,
+  onNext,
+}: {
+  data: OnboardingData;
+  toggle: (id: string) => void;
+  onNext: () => void;
+}) {
+  return (
+    <OnboardCard>
+      <StepEyebrow>Priorities</StepEyebrow>
+      <StepHeading
+        title="Which patterns matter most?"
+        subtitle="Emotional Experience is always on."
+      />
+      <div className="mb-7 grid grid-cols-2 gap-2.5">
+        {INSIGHT_AREAS.map((area) => {
+          const Icon = area.icon;
+          const selected = data.priorities.includes(area.id) || area.required;
+          return (
+            <button
+              key={area.id}
+              type="button"
+              onClick={() => !area.required && toggle(area.id)}
+              disabled={area.required}
+              className={[
+                "relative flex items-center gap-2.5 rounded-[14px] border px-4 py-4 text-left transition-colors",
+                selected ? "bg-accent-bg border-accent" : "bg-bg-soft border-border",
+                area.required ? "cursor-default" : "cursor-pointer",
+              ].join(" ")}
+            >
+              {area.required ? (
+                <span className="text-accent absolute right-2 top-1.5 text-[9px] font-semibold">
+                  ✓ on
+                </span>
+              ) : null}
+              <Icon
+                size={15}
+                strokeWidth={1.75}
+                className={selected ? "text-accent" : "text-ink-mute"}
+              />
+              <span
+                className={[
+                  "text-[13px] font-semibold",
+                  selected ? "text-accent" : "text-ink",
+                ].join(" ")}
+              >
+                {area.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <PillButton variant="primary" size="md" onClick={onNext}>
+        Continue <ArrowRight size={15} strokeWidth={1.75} />
+      </PillButton>
+    </OnboardCard>
+  );
+}
+
+function StepInvite({
+  data,
+  update,
+  onSkip,
+  onSend,
+}: {
+  data: OnboardingData;
+  update: (value: string) => void;
+  onSkip: () => void;
+  onSend: () => void;
+}) {
+  return (
+    <OnboardCard>
+      <StepEyebrow>Optional</StepEyebrow>
+      <StepHeading
+        title="Invite your first client."
+        subtitle="Discuss Attuna with them in session first. Consent matters."
+      />
+      <Field label="Client email" htmlFor="invite">
+        <Input
+          id="invite"
+          name="invite"
+          type="email"
+          autoComplete="off"
+          leftIcon={Mail}
+          placeholder="firstclient@email.com"
+          value={data.invite}
+          onChange={(e) => update(e.target.value)}
+        />
+      </Field>
+      <div className="bg-bg-soft border-border-soft mt-5 rounded-[14px] border px-5 py-4">
+        <div className="text-ink-mute mb-2 text-[11px] font-semibold uppercase tracking-[0.04em]">
+          Email preview
+        </div>
+        <p
+          className="display-text text-ink-soft m-0 text-[14px] font-normal italic"
+          style={{ lineHeight: 1.6 }}
+        >
+          &ldquo;I&apos;ve started using a tool called Attuna to help me prepare for our sessions.
+          It&apos;s a journaling app — only I see what you write. Would you like to try?&rdquo;
+        </p>
+      </div>
+      <div className="mt-6 flex gap-2.5">
+        <PillButton variant="outline" size="md" onClick={onSkip} style={{ flex: 1 }}>
+          Skip for now
+        </PillButton>
+        <PillButton
+          variant="primary"
+          size="md"
+          onClick={onSend}
+          disabled={!data.invite}
+          style={{ flex: 1 }}
+        >
+          <Send size={14} strokeWidth={1.75} /> Send invite
+        </PillButton>
+      </div>
+    </OnboardCard>
+  );
+}
+
+function StepDone({ onOpen }: { onOpen: () => void }) {
+  return (
+    <OnboardCard centered>
+      <div
+        className="bg-accent-bg mx-auto mb-6 flex h-[72px] w-[72px] items-center justify-center rounded-full"
+        style={{ border: "1px solid color-mix(in oklab, var(--accent) 30%, transparent)" }}
+      >
+        <Check size={32} strokeWidth={2} className="text-accent" />
+      </div>
+      <h1
+        className="display text-ink m-0 mb-4 text-[36px] font-medium md:text-[44px]"
+        style={{ letterSpacing: "-0.025em", lineHeight: 1.05 }}
+      >
+        You&apos;re ready.
+      </h1>
+      <p
+        className="text-ink-soft tracking-body mx-auto mb-8 max-w-[420px] text-[15px]"
+        style={{ lineHeight: 1.65 }}
+      >
+        Your account is set up. Briefs become available after a client journals for at least seven
+        days.
+      </p>
+      <PillButton variant="primary" size="md" onClick={onOpen}>
+        Open my workspace <ArrowRight size={15} strokeWidth={1.75} />
+      </PillButton>
+      <p
+        className="display-text text-ink-faint mt-6 text-[13px] font-normal italic"
+        style={{ letterSpacing: "-0.005em" }}
+      >
+        Attuna observes. It does not diagnose.
+      </p>
+    </OnboardCard>
+  );
+}
+
+export default OnboardingFlow;
