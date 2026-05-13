@@ -18,9 +18,9 @@ Status legend:
 | Therapist portal | Next.js 15 (App Router, RSC by default)             | DECIDED  |
 | Mobile client    | Expo / React Native                                 | DECIDED  |
 | API              | Hono on AWS Lambda (HTTP) for MVP, Fargate at scale | PROPOSED |
-| Database         | Postgres on AWS RDS                                 | PROPOSED |
-| ORM              | Drizzle                                             | PROPOSED |
-| Auth             | AWS Cognito User Pools                              | PROPOSED |
+| Database         | Postgres on AWS RDS (Docker locally)                | DECIDED  |
+| ORM              | Drizzle                                             | DECIDED  |
+| Auth             | AWS Cognito User Pools                              | DECIDED  |
 | Storage (PHI)    | S3 with KMS-CMK envelope encryption                 | PROPOSED |
 | Email            | AWS SES                                             | PROPOSED |
 | AI inference     | AWS Bedrock (Anthropic Claude)                      | DECIDED  |

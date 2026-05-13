@@ -1,0 +1,36 @@
+{
+  "name": "@attuna/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drizzle schema, migrations, and repositories for Attuna.",
+  "exports": {
+    "./client": "./src/client.ts",
+    "./context": "./src/context.ts",
+    "./schema": "./src/schema/index.ts",
+    "./schema/*": "./src/schema/*.ts",
+    "./repositories/*": "./src/repositories/*.ts",
+    "./lib/*": "./src/lib/*.ts"
+  },
+  "scripts": {
+    "migrate": "tsx src/migrate.ts",
+    "migrate:test": "DATABASE_URL=$DATABASE_URL_TEST tsx src/migrate.ts",
+    "studio": "drizzle-kit studio",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.36.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@vitest/coverage-v8": "^2.1.5",
+    "dotenv": "^16.4.5",
+    "drizzle-kit": "^0.28.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.5"
+  }
+}

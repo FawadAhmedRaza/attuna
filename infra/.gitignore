@@ -6,3 +6,4 @@ dist/
 !jest.config.js
 .cdk.staging/
 cdk.context.json
+cdk-outputs.json
