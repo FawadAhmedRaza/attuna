@@ -36,6 +36,13 @@
       "when": 1715602000000,
       "tag": "0004_entries",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1715602500000,
+      "tag": "0005_client_invites",
+      "breakpoints": true
     }
   ]
 }

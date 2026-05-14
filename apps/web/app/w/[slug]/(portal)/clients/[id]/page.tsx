@@ -4,11 +4,14 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
 import { db } from "@attuna/db/client";
+import { clientInviteRepo } from "@attuna/db/repositories/client-invite-repo";
 import { clientRepo } from "@attuna/db/repositories/client-repo";
 
 import { resolveActionContext } from "@/lib/workspace/require";
 
 import { PageHeader } from "../../_components/PageHeader";
+
+import { InviteSection } from "./InviteSection";
 
 export const metadata: Metadata = { title: "Client" };
 
@@ -33,6 +36,19 @@ export default async function ClientPage({ params }: Props) {
   if (!c) {
     notFound();
   }
+
+  const pendingList = await clientInviteRepo.listPendingForClient(
+    db(),
+    { workspaceId: ctx.workspaceId, userId: member.userId },
+    c.id,
+  );
+  // listPendingForClient returns invites scoped by client_id within the
+  // workspace; we only ever surface the most-recently-created one that
+  // hasn't been accepted yet. Resend revokes-then-creates so there's
+  // never more than one truly open invite at a time.
+  const openInvite = pendingList
+    .filter((p) => !p.acceptedAt)
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
   const initial = (c.displayName.trim().charAt(0) || "?").toUpperCase();
 
@@ -60,6 +76,25 @@ export default async function ClientPage({ params }: Props) {
         }
       />
 
+      <div className="mb-6">
+        <InviteSection
+          slug={params.slug}
+          clientId={c.id}
+          defaultEmail={c.inviteEmail}
+          clientStatus={c.status}
+          pendingInvite={
+            openInvite
+              ? {
+                  id: openInvite.id,
+                  email: openInvite.email,
+                  expiresAt: openInvite.expiresAt.toISOString(),
+                  createdAt: openInvite.createdAt.toISOString(),
+                }
+              : null
+          }
+        />
+      </div>
+
       <section className="bg-surface border-border rounded-2xl border p-6">
         <h2
           className="display text-ink m-0 mb-1 text-[18px] font-medium"
@@ -68,7 +103,7 @@ export default async function ClientPage({ params }: Props) {
           Details
         </h2>
         <p className="text-ink-mute mb-5 text-[12px]">
-          Journal entries and the seven insight areas land in M2.2 once clients can write.
+          Journal entries and the seven insight areas land alongside the mobile app in M2.3.
         </p>
 
         <div className="flex items-center gap-4">
