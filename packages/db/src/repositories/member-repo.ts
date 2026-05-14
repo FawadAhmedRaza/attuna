@@ -1,7 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 
 import type { Database, WorkspaceContext } from "../context";
 import { withWorkspaceContext } from "../context";
+import { user, type User } from "../schema/user";
 import {
   type MemberStatus,
   type NewWorkspaceMember,
@@ -9,6 +10,15 @@ import {
   type WorkspaceRole,
   workspaceMember,
 } from "../schema/workspace-member";
+
+export interface MemberWithUser {
+  readonly userId: string;
+  readonly email: string;
+  readonly name: string;
+  readonly role: WorkspaceRole;
+  readonly status: MemberStatus;
+  readonly joinedAt: Date | null;
+}
 
 export interface AddMemberInput {
   readonly userId: string;
@@ -41,6 +51,44 @@ export const memberRepo = {
         .select()
         .from(workspaceMember)
         .where(eq(workspaceMember.workspaceId, ctx.workspaceId));
+    });
+  },
+
+  async listWithUser(db: Database, ctx: WorkspaceContext): Promise<MemberWithUser[]> {
+    return withWorkspaceContext(db, ctx, async (tx) => {
+      const rows = await tx
+        .select({
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          role: workspaceMember.role,
+          status: workspaceMember.status,
+          joinedAt: workspaceMember.joinedAt,
+        })
+        .from(workspaceMember)
+        .innerJoin(user, eq(user.id, workspaceMember.userId))
+        .where(eq(workspaceMember.workspaceId, ctx.workspaceId));
+      return rows;
+    });
+  },
+
+  /**
+   * Count of active members holding a given role. Used to enforce the
+   * single-owner invariant before allowing role changes or removals.
+   */
+  async countByRole(db: Database, ctx: WorkspaceContext, role: WorkspaceRole): Promise<number> {
+    return withWorkspaceContext(db, ctx, async (tx) => {
+      const [row] = await tx
+        .select({ n: count() })
+        .from(workspaceMember)
+        .where(
+          and(
+            eq(workspaceMember.workspaceId, ctx.workspaceId),
+            eq(workspaceMember.role, role),
+            eq(workspaceMember.status, "active"),
+          ),
+        );
+      return row?.n ?? 0;
     });
   },
 
@@ -106,5 +154,42 @@ export const memberRepo = {
       .where(and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, userId)))
       .returning();
     return rows[0] ?? null;
+  },
+
+  /**
+   * Inserts (or re-activates) a workspace_member row when a user accepts an
+   * invite. No WorkspaceContext — the caller has just consumed a valid
+   * invite token and isn't yet a member. If a row exists (e.g. they were
+   * removed and re-invited) we flip them back to active with the new role.
+   */
+  async joinFromInvite(
+    db: Database,
+    input: {
+      workspaceId: string;
+      userId: string;
+      role: WorkspaceRole;
+      invitedBy?: string | null;
+    },
+  ): Promise<void> {
+    const now = new Date();
+    await db
+      .insert(workspaceMember)
+      .values({
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        role: input.role,
+        status: "active",
+        invitedBy: input.invitedBy ?? null,
+        joinedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [workspaceMember.workspaceId, workspaceMember.userId],
+        set: {
+          role: input.role,
+          status: "active",
+          invitedBy: input.invitedBy ?? null,
+          joinedAt: now,
+        },
+      });
   },
 };
