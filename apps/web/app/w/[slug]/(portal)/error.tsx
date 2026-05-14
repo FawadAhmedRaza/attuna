@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { AlertCircle } from "lucide-react";
 
 import { PillButton } from "@attuna/ui/PillButton";
@@ -20,6 +21,7 @@ export default function PortalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const params = useParams<{ slug: string }>();
   useEffect(() => {
     // In production this would funnel to a PHI-scrubbed error reporter.
     // Today we just log to the dev console so the cause isn't invisible.
@@ -54,7 +56,7 @@ export default function PortalError({
         <PillButton variant="primary" size="sm" onClick={reset}>
           Try again
         </PillButton>
-        <Link href="/today">
+        <Link href={params.slug ? `/w/${params.slug}/today` : "/"}>
           <PillButton variant="outline" size="sm">
             Back to Today
           </PillButton>

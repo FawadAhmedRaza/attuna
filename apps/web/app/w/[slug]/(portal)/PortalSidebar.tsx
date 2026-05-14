@@ -7,12 +7,12 @@ import {
   BookOpen,
   Building2,
   Calendar,
+  Check,
   ChevronLeft,
   ChevronRight,
   CreditCard,
   LayoutDashboard,
   LogOut,
-  MessageSquareText,
   Moon,
   Plug,
   ScrollText,
@@ -32,7 +32,8 @@ import { ROLE_LABELS, useRole, type Permission } from "@/lib/rbac";
 import { useTheme } from "@/lib/use-theme";
 
 type NavItem = {
-  href: string;
+  /** Path suffix relative to `/w/[slug]`, e.g. "today" or "clients". */
+  segment: string;
   icon: LucideIcon;
   label: string;
   count?: number;
@@ -40,41 +41,48 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { href: "/today", icon: LayoutDashboard, label: "Today" },
-  { href: "/calendar", icon: Calendar, label: "Calendar" },
-  { href: "/clients", icon: Users, label: "Clients", count: 4 },
-  { href: "/assistant", icon: MessageSquareText, label: "AI assistant" },
-  { href: "/suggestions", icon: Sparkles, label: "Suggestions" },
-  { href: "/templates", icon: BookOpen, label: "Templates" },
+  { segment: "today", icon: LayoutDashboard, label: "Today" },
+  { segment: "calendar", icon: Calendar, label: "Calendar" },
+  { segment: "clients", icon: Users, label: "Clients", count: 4 },
+  { segment: "suggestions", icon: Sparkles, label: "Suggestions" },
+  { segment: "templates", icon: BookOpen, label: "Templates" },
 ];
 
 const ADMIN_NAV: NavItem[] = [
-  { href: "/clinic", icon: Building2, label: "Clinic", permission: "view_clinic" },
-  { href: "/audit", icon: ScrollText, label: "Audit log", permission: "view_audit" },
-  { href: "/integrations", icon: Plug, label: "Integrations", permission: "manage_integrations" },
-  { href: "/billing", icon: CreditCard, label: "Billing", permission: "view_billing" },
-  { href: "/roles", icon: ShieldCheck, label: "Roles", permission: "manage_roles" },
+  { segment: "clinic", icon: Building2, label: "Clinic", permission: "view_clinic" },
+  { segment: "audit", icon: ScrollText, label: "Audit log", permission: "view_audit" },
+  {
+    segment: "integrations",
+    icon: Plug,
+    label: "Integrations",
+    permission: "manage_integrations",
+  },
+  { segment: "billing", icon: CreditCard, label: "Billing", permission: "view_billing" },
+  { segment: "roles", icon: ShieldCheck, label: "Roles", permission: "manage_roles" },
 ];
 
-const ONBOARDING_KEY = "attuna_onboarding_v1";
 const COLLAPSED_KEY = "attuna_sidebar_collapsed_v1";
 
-export function PortalSidebar({ name }: { name: string }) {
+export type SidebarWorkspace = { slug: string; name: string };
+
+export function PortalSidebar({
+  name,
+  activeSlug,
+  workspaces,
+}: {
+  name: string;
+  activeSlug: string;
+  workspaces: SidebarWorkspace[];
+}) {
   const pathname = usePathname();
   const { theme, toggle } = useTheme();
   const { role, can } = useRole();
-  const [practiceName, setPracticeName] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const visibleAdmin = ADMIN_NAV.filter((item) => !item.permission || can(item.permission));
 
+  const activeWorkspace = workspaces.find((w) => w.slug === activeSlug);
+
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(ONBOARDING_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { practice?: string };
-        if (parsed.practice) setPracticeName(parsed.practice);
-      }
-    } catch {}
     try {
       setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
     } catch {}
@@ -91,8 +99,11 @@ export function PortalSidebar({ name }: { name: string }) {
   }, []);
 
   const initial = name.trim().charAt(0).toUpperCase() || "?";
-  const isActive = (href: string) =>
-    pathname === href || (href !== "/today" && pathname.startsWith(href + "/"));
+  const hrefFor = (segment: string) => `/w/${activeSlug}/${segment}`;
+  const isActive = (segment: string) => {
+    const target = hrefFor(segment);
+    return pathname === target || pathname.startsWith(target + "/");
+  };
 
   return (
     <aside
@@ -115,9 +126,9 @@ export function PortalSidebar({ name }: { name: string }) {
           ) : (
             <>
               <Logo small />
-              {practiceName ? (
+              {activeWorkspace ? (
                 <div className="text-ink-mute mt-2 truncate text-[11px] font-medium">
-                  {practiceName}
+                  {activeWorkspace.name}
                 </div>
               ) : null}
             </>
@@ -140,9 +151,25 @@ export function PortalSidebar({ name }: { name: string }) {
       </div>
 
       <nav className={["flex-1 overflow-y-auto py-4", collapsed ? "px-2" : "px-3"].join(" ")}>
+        {workspaces.length > 1 ? (
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            activeSlug={activeSlug}
+            collapsed={collapsed}
+          />
+        ) : null}
+
         {!collapsed ? <SectionLabel>Workspace</SectionLabel> : null}
         {NAV.map((item) => (
-          <NavLink key={item.href} item={item} collapsed={collapsed} active={isActive(item.href)} />
+          <NavLink
+            key={item.segment}
+            href={hrefFor(item.segment)}
+            icon={item.icon}
+            label={item.label}
+            count={item.count}
+            collapsed={collapsed}
+            active={isActive(item.segment)}
+          />
         ))}
 
         {visibleAdmin.length > 0 ? (
@@ -151,10 +178,13 @@ export function PortalSidebar({ name }: { name: string }) {
             {collapsed ? <CollapsedDivider /> : null}
             {visibleAdmin.map((item) => (
               <NavLink
-                key={item.href}
-                item={item}
+                key={item.segment}
+                href={hrefFor(item.segment)}
+                icon={item.icon}
+                label={item.label}
+                count={item.count}
                 collapsed={collapsed}
-                active={isActive(item.href)}
+                active={isActive(item.segment)}
               />
             ))}
           </>
@@ -201,8 +231,8 @@ export function PortalSidebar({ name }: { name: string }) {
 
         <FooterRow
           icon={Settings}
-          href="/settings"
-          active={pathname === "/settings"}
+          href={hrefFor("settings")}
+          active={isActive("settings")}
           collapsed={collapsed}
           tooltip="Settings"
         >
@@ -219,16 +249,88 @@ export function PortalSidebar({ name }: { name: string }) {
   );
 }
 
+function WorkspaceSwitcher({
+  workspaces,
+  activeSlug,
+  collapsed,
+}: {
+  workspaces: SidebarWorkspace[];
+  activeSlug: string;
+  collapsed: boolean;
+}) {
+  if (collapsed) {
+    return (
+      <>
+        {workspaces.map((w) => {
+          const active = w.slug === activeSlug;
+          return (
+            <Link
+              key={w.slug}
+              href={`/w/${w.slug}/today`}
+              title={w.name}
+              aria-label={`Switch to ${w.name}`}
+              className={[
+                "tracking-body mb-0.5 flex h-10 w-full items-center justify-center rounded-[10px] transition-colors",
+                active
+                  ? "bg-accent-bg text-accent font-semibold"
+                  : "text-ink-soft hover:text-ink font-medium",
+              ].join(" ")}
+            >
+              <span className="display bg-surface-deep flex h-[22px] w-[22px] items-center justify-center rounded-full text-[11px] font-semibold">
+                {w.name.trim().charAt(0).toUpperCase() || "?"}
+              </span>
+            </Link>
+          );
+        })}
+        <CollapsedDivider />
+      </>
+    );
+  }
+
+  return (
+    <div className="mb-3">
+      <SectionLabel>Workspaces</SectionLabel>
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {workspaces.map((w) => {
+          const active = w.slug === activeSlug;
+          return (
+            <li key={w.slug}>
+              <Link
+                href={`/w/${w.slug}/today`}
+                aria-current={active ? "page" : undefined}
+                className={[
+                  "tracking-body flex items-center justify-between rounded-[10px] px-3 py-2 text-[13px] transition-colors",
+                  active
+                    ? "bg-accent-bg text-accent font-semibold"
+                    : "text-ink-soft hover:text-ink font-medium",
+                ].join(" ")}
+              >
+                <span className="truncate">{w.name}</span>
+                {active ? <Check size={13} strokeWidth={2} /> : null}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function NavLink({
-  item,
+  href,
+  icon: Icon,
+  label,
+  count,
   collapsed,
   active,
 }: {
-  item: NavItem;
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  count?: number;
   collapsed: boolean;
   active: boolean;
 }) {
-  const Icon = item.icon;
   const baseCls = [
     "mb-0.5 flex items-center rounded-[10px] transition-colors tracking-body",
     active ? "bg-accent-bg text-accent font-semibold" : "text-ink-soft hover:text-ink font-medium",
@@ -237,13 +339,13 @@ function NavLink({
   if (collapsed) {
     return (
       <Link
-        href={item.href}
-        title={item.label + (item.count ? ` · ${item.count}` : "")}
-        aria-label={item.label}
+        href={href}
+        title={label + (count ? ` · ${count}` : "")}
+        aria-label={label}
         className={[baseCls, "relative h-10 w-full justify-center"].join(" ")}
       >
         <Icon size={16} strokeWidth={1.75} />
-        {item.count ? (
+        {count ? (
           <span className="bg-accent absolute right-1.5 top-1.5 h-2 w-2 rounded-full" />
         ) : null}
       </Link>
@@ -251,14 +353,14 @@ function NavLink({
   }
 
   return (
-    <Link href={item.href} className={[baseCls, "justify-between px-3 py-2 text-[13px]"].join(" ")}>
+    <Link href={href} className={[baseCls, "justify-between px-3 py-2 text-[13px]"].join(" ")}>
       <span className="flex items-center gap-2.5">
         <Icon size={14} strokeWidth={1.75} />
-        {item.label}
+        {label}
       </span>
-      {item.count ? (
+      {count ? (
         <span className="bg-surface-deep text-ink-mute rounded-full px-1.5 py-px text-[10px] font-semibold">
-          {item.count}
+          {count}
         </span>
       ) : null}
     </Link>

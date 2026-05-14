@@ -2,7 +2,7 @@
 
 import { useMemo, useTransition } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, ChevronsUpDown, Plus, Search, X } from "lucide-react";
 
 import { Input } from "@attuna/ui/Input";
@@ -288,9 +288,10 @@ function SortHeader({
 // ─── Row ──────────────────────────────────────────────────────────────
 
 function ClientRowLink({ client, isLast }: { client: ClientRow; isLast: boolean }) {
+  const params = useParams<{ slug: string }>();
   return (
     <Link
-      href={`/clients/${client.id}`}
+      href={`/w/${params.slug}/clients/${client.id}`}
       className={[
         GRID,
         "hover:bg-bg-soft items-center gap-4 px-5 py-4 transition-colors md:px-6",
