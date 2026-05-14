@@ -171,11 +171,13 @@ export function OnboardingFlow() {
     }
     // Successful submit: the server action redirects, but if we get here
     // (e.g. action returned ok:true without redirecting in some future
-    // refactor), fall back to a client-side push.
+    // refactor), fall back to a client-side push. We don't know the new
+    // slug here, so route through `/` — the root page resolves the user's
+    // active workspace from the cookie/DB and redirects there.
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {}
-    router.push("/today");
+    router.push("/");
   };
 
   return (

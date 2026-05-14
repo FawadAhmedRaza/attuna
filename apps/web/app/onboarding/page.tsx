@@ -23,7 +23,7 @@ export default async function OnboardingPage() {
   // Users who already have a workspace skip onboarding.
   const workspaces = await workspaceRepo.listForUser(db(), session.userId);
   if (workspaces.length > 0) {
-    redirect("/today");
+    redirect(`/w/${workspaces[0]!.slug}/today`);
   }
 
   return (

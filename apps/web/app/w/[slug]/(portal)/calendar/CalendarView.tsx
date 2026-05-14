@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, MapPin, Plus } from "lucide-react";
 
 import { PillButton } from "@attuna/ui/PillButton";
@@ -504,6 +505,7 @@ function DayPanel({
 }
 
 function UpcomingPanel({ sessions }: { sessions: Session[] }) {
+  const params = useParams<{ slug: string }>();
   if (sessions.length === 0) return null;
   return (
     <section className="bg-surface border-border rounded-2xl border p-5 md:p-6">
@@ -517,7 +519,7 @@ function UpcomingPanel({ sessions }: { sessions: Session[] }) {
         {sessions.map((s) => (
           <li key={s.id}>
             <Link
-              href={`/clients/${s.clientId}`}
+              href={`/w/${params.slug}/clients/${s.clientId}`}
               className="border-border-soft hover:border-accent flex items-center gap-3 rounded-[12px] border px-3 py-2.5 transition-colors"
             >
               <div className="display bg-surface-deep text-ink-soft flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-medium">
@@ -548,6 +550,7 @@ function UpcomingPanel({ sessions }: { sessions: Session[] }) {
 }
 
 function SessionRow({ session, onEdit }: { session: Session; onEdit: () => void }) {
+  const params = useParams<{ slug: string }>();
   return (
     <div className="bg-bg-soft border-border-soft hover:border-accent group flex items-start gap-3 rounded-[12px] border px-3 py-3 transition-colors">
       <button
@@ -584,7 +587,7 @@ function SessionRow({ session, onEdit }: { session: Session; onEdit: () => void 
           </span>
         ) : null}
         <Link
-          href={`/clients/${session.clientId}`}
+          href={`/w/${params.slug}/clients/${session.clientId}`}
           aria-label={`Open ${session.clientName}'s client page`}
           className="text-ink-mute hover:text-ink hover:bg-surface rounded-full p-1 transition-colors"
         >

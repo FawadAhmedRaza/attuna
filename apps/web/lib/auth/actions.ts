@@ -66,15 +66,19 @@ export async function signInAction(
   await setSession(result.subject);
 
   // First-time users (no workspace yet) land in onboarding; everyone else
-  // honors the `next` param or falls through to /today. We check by DB
-  // rather than session because the session JWT doesn't carry workspace
-  // membership state.
+  // goes to /w/{first}/today. We don't carry workspace_id in the session
+  // JWT (ARCHITECTURE §4), so this lookup happens server-side per sign-in.
   const memberOf = await workspaceRepo.listForUser(db(), result.subject.userId);
   if (memberOf.length === 0) {
     redirect("/onboarding");
   }
   const next = formData.get("next");
-  redirect(typeof next === "string" && next.startsWith("/") ? next : "/today");
+  if (typeof next === "string" && next.startsWith("/w/")) {
+    // Honor `next` only when it's a workspace-scoped path. The gate layout
+    // validates membership for the target slug on render.
+    redirect(next);
+  }
+  redirect(`/w/${memberOf[0]!.slug}/today`);
 }
 
 // ── sign up ────────────────────────────────────────────────────────

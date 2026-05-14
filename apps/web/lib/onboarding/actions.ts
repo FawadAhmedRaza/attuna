@@ -77,11 +77,12 @@ export async function submitOnboardingAction(
     };
   }
 
-  // Idempotency: if this user already has a workspace, send them to /today.
-  // Prevents accidental duplicate workspaces from form replay or double-click.
+  // Idempotency: if this user already has a workspace, send them to their
+  // existing one. Prevents duplicate workspaces from form replay or
+  // double-click.
   const existing = await workspaceRepo.listForUser(db(), session.userId);
   if (existing.length > 0) {
-    redirect("/today");
+    redirect(`/w/${existing[0]!.slug}/today`);
   }
 
   const free = await workspaceRepo.isSlugAvailable(db(), parsed.data.slug);
@@ -89,6 +90,7 @@ export async function submitOnboardingAction(
     return { ok: false, error: "That workspace URL is taken — try another." };
   }
 
+  let createdSlug: string;
   try {
     const ws = await workspaceRepo.create(db(), {
       slug: parsed.data.slug,
@@ -105,6 +107,8 @@ export async function submitOnboardingAction(
       specialty: parsed.data.specialty,
       priorities: parsed.data.priorities,
     });
+
+    createdSlug = ws.slug;
   } catch (err) {
     // Most likely cause: slug raced and is now taken. Don't surface internals.
     return { ok: false, error: "Could not create your workspace. Try again." };
@@ -112,5 +116,5 @@ export async function submitOnboardingAction(
 
   // redirect MUST be outside the try/catch — it throws a NEXT_REDIRECT signal
   // that the action runtime catches and converts to an HTTP redirect.
-  redirect("/today");
+  redirect(`/w/${createdSlug}/today`);
 }

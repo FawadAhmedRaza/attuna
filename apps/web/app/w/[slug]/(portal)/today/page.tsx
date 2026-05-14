@@ -43,7 +43,7 @@ const SCHEDULE = [
   { time: "4:00 PM", client: "James K.", initial: "J", duration: "50 min", brief: false },
 ];
 
-export default async function TodayPage() {
+export default async function TodayPage({ params }: { params: { slug: string } }) {
   const token = cookies().get(SESSION_COOKIE_NAME)?.value;
   const session = token ? await verifySessionToken(token) : null;
   const firstName = session?.name?.split(" ")[0] ?? "there";
@@ -61,8 +61,8 @@ export default async function TodayPage() {
       </p>
 
       <StatsGrid />
-      <ReadyToRead />
-      <TomorrowSchedule />
+      <ReadyToRead slug={params.slug} />
+      <TomorrowSchedule slug={params.slug} />
     </div>
   );
 }
@@ -88,7 +88,7 @@ function StatsGrid() {
   );
 }
 
-function ReadyToRead() {
+function ReadyToRead({ slug }: { slug: string }) {
   return (
     <section className="mb-10">
       <div className="mb-4 flex items-center justify-between">
@@ -105,7 +105,7 @@ function ReadyToRead() {
         {READY_BRIEFS.map((c) => (
           <Link
             key={c.id}
-            href={`/clients/${c.id}`}
+            href={`/w/${slug}/clients/${c.id}`}
             className="card-warm bg-surface border-border flex items-center gap-4 rounded-2xl border px-5 py-5 transition-colors md:px-6"
           >
             <div className="display bg-accent-bg text-accent flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[18px] font-medium">
@@ -134,7 +134,7 @@ function ReadyToRead() {
   );
 }
 
-function TomorrowSchedule() {
+function TomorrowSchedule({ slug }: { slug: string }) {
   return (
     <section>
       <div className="mb-4 flex items-center justify-between">
@@ -145,7 +145,7 @@ function TomorrowSchedule() {
           Tomorrow&apos;s schedule
         </h2>
         <Link
-          href="/calendar"
+          href={`/w/${slug}/calendar`}
           className="text-ink-soft border-border tracking-body hover:text-ink inline-flex items-center justify-center gap-2 rounded-full border bg-transparent px-[18px] py-[9px] font-sans text-[13px] font-medium"
         >
           View calendar
