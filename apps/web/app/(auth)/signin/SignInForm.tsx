@@ -27,7 +27,7 @@ function SubmitButton() {
   );
 }
 
-export function SignInForm({ next }: { next?: string }) {
+export function SignInForm({ next, defaultEmail }: { next?: string; defaultEmail?: string }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(signInAction, null);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -42,6 +42,7 @@ export function SignInForm({ next }: { next?: string }) {
           type="email"
           autoComplete="email"
           required
+          defaultValue={defaultEmail}
           leftIcon={Mail}
           placeholder="you@practice.com"
           invalid={state?.ok === false}

@@ -7,7 +7,7 @@ import { SignInForm } from "./SignInForm";
 export const metadata: Metadata = { title: "Sign in" };
 
 type SignInPageProps = {
-  searchParams: { next?: string; reset?: string };
+  searchParams: { next?: string; reset?: string; verified?: string; email?: string };
 };
 
 export default function SignInPage({ searchParams }: SignInPageProps) {
@@ -16,6 +16,11 @@ export default function SignInPage({ searchParams }: SignInPageProps) {
       ? searchParams.next
       : undefined;
   const justReset = searchParams.reset === "1";
+  const justVerified = searchParams.verified === "1";
+  const prefillEmail =
+    typeof searchParams.email === "string" && searchParams.email.length > 0
+      ? searchParams.email
+      : undefined;
 
   return (
     <div className="bg-surface border-border rounded-[20px] border p-8 md:p-10">
@@ -42,7 +47,17 @@ export default function SignInPage({ searchParams }: SignInPageProps) {
         </div>
       ) : null}
 
-      <SignInForm next={next} />
+      {justVerified ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="bg-accent-bg text-accent border-accent/20 mb-5 rounded-[12px] border px-4 py-3 text-[13px] font-medium"
+        >
+          Email verified. Sign in to continue.
+        </div>
+      ) : null}
+
+      <SignInForm next={next} defaultEmail={prefillEmail} />
     </div>
   );
 }

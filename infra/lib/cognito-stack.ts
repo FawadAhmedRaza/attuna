@@ -61,8 +61,11 @@ export class CognitoStack extends Stack {
     this.therapistUserPoolClient = this.therapistUserPool.addClient("TherapistWebClient", {
       userPoolClientName: `attuna-therapist-web-${envName}`,
       authFlows: {
+        // USER_PASSWORD_AUTH is fine for M1 dev (Next.js server proxies sign-in
+        // over TLS). Before staging we switch to SRP via amazon-cognito-identity-js
+        // so the password never reaches our server.
         userSrp: true,
-        userPassword: false,
+        userPassword: envName !== "prod",
         adminUserPassword: false,
         custom: false,
       },
