@@ -2,12 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-// `super_admin` is platform-level (Attuna staff). They do not belong to a
-// clinic, do not see PHI, and do not have clinical permissions. Their reach is
-// limited to platform-admin surfaces (feature flags, license review, kill
-// switches). When the real `apps/admin` lands, super_admin moves out of the
-// therapist portal entirely; for now it's gated inside this app.
-export type Role = "super_admin" | "owner" | "clinic_admin" | "therapist";
+// Roles that exist inside a clinic workspace. Platform-level admin
+// (Attuna staff) lives in a separate `apps/admin` and is granted
+// out-of-band — it is not a role anyone in this portal can hold.
+export type Role = "owner" | "clinic_admin" | "therapist";
 
 export type Permission =
   | "view_clients"
@@ -23,26 +21,21 @@ export type Permission =
   | "manage_integrations"
   | "view_billing"
   | "manage_billing"
-  | "manage_roles"
-  | "view_platform_admin"
-  | "manage_feature_flags"
-  | "review_licenses";
+  | "manage_roles";
 
 export const ROLE_LABELS: Record<Role, string> = {
-  super_admin: "Super admin",
   owner: "Owner",
   clinic_admin: "Clinic admin",
   therapist: "Therapist",
 };
 
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
-  super_admin: "Attuna staff. Platform-level admin. No clinical access, no PHI.",
   owner: "Full access. Can manage billing, roles, and the practice.",
   clinic_admin: "Manages therapists, integrations, and audit. No billing changes.",
   therapist: "Sees their own clients and briefs. No admin surfaces.",
 };
 
-export const ROLES: Role[] = ["super_admin", "owner", "clinic_admin", "therapist"];
+export const ROLES: Role[] = ["owner", "clinic_admin", "therapist"];
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
   view_clients: "View clients",
@@ -59,9 +52,6 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   view_billing: "View subscription & invoices",
   manage_billing: "Change plan or payment method",
   manage_roles: "Assign roles & permissions",
-  view_platform_admin: "Access platform admin surfaces",
-  manage_feature_flags: "Toggle feature flags",
-  review_licenses: "Review therapist license submissions",
 };
 
 export const PERMISSION_GROUPS: { label: string; permissions: Permission[] }[] = [
@@ -87,21 +77,9 @@ export const PERMISSION_GROUPS: { label: string; permissions: Permission[] }[] =
     label: "Account",
     permissions: ["view_billing", "manage_billing", "manage_roles"],
   },
-  {
-    label: "Platform (Attuna staff only)",
-    permissions: ["view_platform_admin", "manage_feature_flags", "review_licenses"],
-  },
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  super_admin: [
-    "view_platform_admin",
-    "manage_feature_flags",
-    "review_licenses",
-    // Audit surface is shared so support can debug without crossing into PHI.
-    // The audit log itself must never contain PHI per HIPAA.md (TBD).
-    "view_audit",
-  ],
   owner: [
     "view_clients",
     "edit_clients",
@@ -149,7 +127,7 @@ function readRole(): Role {
   if (typeof window === "undefined") return "owner";
   try {
     const raw = localStorage.getItem(ROLE_KEY);
-    if (raw === "super_admin" || raw === "owner" || raw === "clinic_admin" || raw === "therapist") {
+    if (raw === "owner" || raw === "clinic_admin" || raw === "therapist") {
       return raw;
     }
   } catch {}

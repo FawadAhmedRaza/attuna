@@ -159,7 +159,7 @@ function PermissionRow({ permission, striped }: { permission: Permission; stripe
   return (
     <div
       className={[
-        "border-border-soft grid grid-cols-1 items-center gap-3 border-b px-6 py-3.5 last:border-b-0 md:grid-cols-[1.6fr_repeat(4,1fr)]",
+        "border-border-soft grid grid-cols-1 items-center gap-3 border-b px-6 py-3.5 last:border-b-0 md:grid-cols-[1.6fr_repeat(3,1fr)]",
         striped ? "bg-bg-soft/30" : "",
       ].join(" ")}
     >
@@ -233,10 +233,7 @@ function TeamTable({ currentRole, canManage }: { currentRole: Role; canManage: b
               className="bg-bg-soft text-ink border-border focus:border-accent rounded-[10px] border px-3 py-2 text-[13px] font-medium transition-colors disabled:opacity-60"
               aria-label={`Role for ${member.name}`}
             >
-              {/* Clinic members can never be promoted to super_admin from
-                  here — that role is platform-level (Attuna staff only) and
-                  is granted out-of-band. */}
-              {ROLES.filter((r) => r !== "super_admin").map((r) => (
+              {ROLES.map((r) => (
                 <option key={r} value={r}>
                   {ROLE_LABELS[r]}
                 </option>

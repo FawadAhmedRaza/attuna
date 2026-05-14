@@ -1,16 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  Award,
-  Bell,
-  Building2,
-  Lock,
-  Shield,
-  ShieldCheck,
-  User,
-  type LucideIcon,
-} from "lucide-react";
+import { Award, Bell, Building2, Lock, Shield, User, type LucideIcon } from "lucide-react";
 
 import { useRole, type Permission } from "@/lib/rbac";
 
@@ -18,7 +9,6 @@ import {
   ClinicCard,
   CredentialsCard,
   NotificationsCard,
-  PlatformCard,
   PrivacyCard,
   ProfileCard,
   SecurityCard,
@@ -31,14 +21,7 @@ type TabConfig = {
   permission?: Permission;
 };
 
-type TabId =
-  | "profile"
-  | "credentials"
-  | "clinic"
-  | "platform"
-  | "notifications"
-  | "security"
-  | "privacy";
+type TabId = "profile" | "credentials" | "clinic" | "notifications" | "security" | "privacy";
 
 // Order matters — this is the visual order in the nav. Permission gates each
 // tab; an undefined permission means "everyone signed in sees this".
@@ -46,7 +29,6 @@ const TABS: TabConfig[] = [
   { id: "profile", label: "Profile", icon: User },
   { id: "credentials", label: "Credentials", icon: Award, permission: "view_clients" },
   { id: "clinic", label: "Clinic", icon: Building2, permission: "manage_clinic" },
-  { id: "platform", label: "Platform", icon: ShieldCheck, permission: "view_platform_admin" },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "security", label: "Security", icon: Lock },
   { id: "privacy", label: "Privacy", icon: Shield },
@@ -111,9 +93,6 @@ export function SettingsTabs({ name, email }: { name: string; email: string }) {
         </Panel>
         <Panel id="clinic" active={tab === "clinic"}>
           <ClinicCard />
-        </Panel>
-        <Panel id="platform" active={tab === "platform"}>
-          <PlatformCard />
         </Panel>
         <Panel id="notifications" active={tab === "notifications"}>
           <NotificationsCard />
