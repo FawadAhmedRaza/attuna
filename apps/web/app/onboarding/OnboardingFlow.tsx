@@ -24,6 +24,10 @@ import { Eyebrow } from "@attuna/ui/Eyebrow";
 import { Field } from "@attuna/ui/Field";
 import { Input } from "@attuna/ui/Input";
 import { PillButton } from "@attuna/ui/PillButton";
+import { PRICING_TIERS } from "@attuna/ui/pricing-data";
+import { slugify } from "@attuna/db/lib/slug";
+
+import { submitOnboardingAction } from "@/lib/onboarding/actions";
 
 const STORAGE_KEY = "attuna_onboarding_v1";
 const TOTAL_STEPS = 6; // 0..5 inclusive
@@ -33,6 +37,7 @@ type ClientBand = "" | "1-10" | "11-25" | "26-50" | "50+";
 
 type OnboardingData = {
   practice: string;
+  slug: string;
   license: string;
   practice_type: PracticeType;
   client_count: ClientBand;
@@ -43,6 +48,7 @@ type OnboardingData = {
 
 const DEFAULT_DATA: OnboardingData = {
   practice: "",
+  slug: "",
   license: "",
   practice_type: "",
   client_count: "",
@@ -50,13 +56,6 @@ const DEFAULT_DATA: OnboardingData = {
   priorities: ["emotional"],
   invite: "",
 };
-
-const PRACTICE_TYPES: { id: Exclude<PracticeType, "">; label: string }[] = [
-  { id: "solo", label: "Solo private practice" },
-  { id: "group", label: "Group practice" },
-  { id: "clinic", label: "Multi-clinician clinic" },
-  { id: "training", label: "Training program" },
-];
 
 const CLIENT_BANDS: Exclude<ClientBand, "">[] = ["1-10", "11-25", "26-50", "50+"];
 
@@ -109,9 +108,14 @@ export function OnboardingFlow() {
   const [step, setStep] = useState(0);
   const [data, setData] = useState<OnboardingData>(DEFAULT_DATA);
   const [hydrated, setHydrated] = useState(false);
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    setData(loadData());
+    const loaded = loadData();
+    setData(loaded);
+    setSlugTouched(loaded.slug.length > 0 && loaded.slug !== slugify(loaded.practice));
     setHydrated(true);
   }, []);
 
@@ -122,15 +126,55 @@ export function OnboardingFlow() {
   const update = <K extends keyof OnboardingData>(key: K, value: OnboardingData[K]) =>
     setData((d) => ({ ...d, [key]: value }));
 
+  const updatePractice = (value: string) => {
+    setData((d) => ({
+      ...d,
+      practice: value,
+      slug: slugTouched ? d.slug : slugify(value),
+    }));
+  };
+
+  const updateSlug = (value: string) => {
+    setSlugTouched(true);
+    setData((d) => ({ ...d, slug: slugify(value) }));
+  };
+
   const toggleArr = (key: "specialty" | "priorities", value: string) =>
     setData((d) => ({
       ...d,
       [key]: d[key].includes(value) ? d[key].filter((x) => x !== value) : [...d[key], value],
     }));
 
-  const finish = () => {
-    // Phase 2: localStorage only. Phase 3 will POST this to the API.
-    saveData(data);
+  const finish = async () => {
+    setPending(true);
+    setSubmitError(null);
+
+    const formData = new FormData();
+    formData.set("practice", data.practice);
+    formData.set("slug", data.slug);
+    if (data.license) formData.set("license", data.license);
+    if (data.practice_type) formData.set("practice_type", data.practice_type);
+    if (data.client_count) formData.set("client_count", data.client_count);
+    data.specialty.forEach((s) => formData.append("specialty", s));
+    data.priorities.forEach((p) => formData.append("priorities", p));
+
+    const result = await submitOnboardingAction(null, formData);
+    if (result && result.ok === false) {
+      setSubmitError(result.error);
+      setPending(false);
+      // Slug/practice errors live on step 1 — send the user back to fix them.
+      const lower = result.error.toLowerCase();
+      if (lower.includes("url") || lower.includes("slug") || lower.includes("practice")) {
+        setStep(1);
+      }
+      return;
+    }
+    // Successful submit: the server action redirects, but if we get here
+    // (e.g. action returned ok:true without redirecting in some future
+    // refactor), fall back to a client-side push.
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
     router.push("/today");
   };
 
@@ -142,7 +186,16 @@ export function OnboardingFlow() {
 
       <div className="fade-in" key={step}>
         {step === 0 && <StepWelcome onNext={() => setStep(1)} />}
-        {step === 1 && <StepPractice data={data} update={update} onNext={() => setStep(2)} />}
+        {step === 1 && (
+          <StepPractice
+            data={data}
+            update={update}
+            updatePractice={updatePractice}
+            updateSlug={updateSlug}
+            stepError={step === 1 ? submitError : null}
+            onNext={() => setStep(2)}
+          />
+        )}
         {step === 2 && (
           <StepSpecialties
             data={data}
@@ -165,7 +218,7 @@ export function OnboardingFlow() {
             onSend={() => setStep(5)}
           />
         )}
-        {step === 5 && <StepDone onOpen={finish} />}
+        {step === 5 && <StepDone onOpen={finish} pending={pending} error={submitError} />}
       </div>
     </div>
   );
@@ -300,6 +353,62 @@ function StepHeading({ title, subtitle }: { title: string; subtitle: string }) {
   );
 }
 
+function TierCard({
+  tier,
+  selected,
+  onClick,
+}: {
+  tier: (typeof PRICING_TIERS)[number];
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={[
+        "relative flex flex-col gap-2 rounded-[14px] border p-4 text-left transition-colors",
+        selected ? "bg-accent-bg border-accent" : "bg-bg-soft border-border hover:border-accent/40",
+      ].join(" ")}
+    >
+      {tier.featured ? (
+        <span className="bg-warm text-ink-on-accent absolute -top-2 right-3 rounded-full px-2 py-0.5 text-[10px] font-semibold">
+          Most chosen
+        </span>
+      ) : null}
+      <div className="flex items-baseline justify-between gap-2">
+        <span
+          className={[
+            "display text-[18px] font-medium",
+            selected ? "text-accent" : "text-ink",
+          ].join(" ")}
+          style={{ letterSpacing: "-0.015em" }}
+        >
+          {tier.name}
+        </span>
+        <span className="text-ink-mute text-[12px] font-medium">
+          <span className={selected ? "text-accent" : "text-ink"}>${tier.price.monthly}</span>
+          /mo
+        </span>
+      </div>
+      <p className="text-ink-mute m-0 text-[12px] font-medium">{tier.tag}</p>
+      <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0">
+        {tier.features.slice(0, 2).map((f) => (
+          <li
+            key={f}
+            className="text-ink-soft tracking-body flex gap-1.5 text-[12px]"
+            style={{ lineHeight: 1.5 }}
+          >
+            <Check size={11} strokeWidth={2.5} className="text-sage mt-0.5 flex-shrink-0" />
+            {f}
+          </li>
+        ))}
+      </ul>
+    </button>
+  );
+}
+
 function ChoiceChip({
   selected,
   disabled = false,
@@ -333,13 +442,19 @@ function ChoiceChip({
 function StepPractice({
   data,
   update,
+  updatePractice,
+  updateSlug,
+  stepError,
   onNext,
 }: {
   data: OnboardingData;
   update: <K extends keyof OnboardingData>(key: K, value: OnboardingData[K]) => void;
+  updatePractice: (value: string) => void;
+  updateSlug: (value: string) => void;
+  stepError: string | null;
   onNext: () => void;
 }) {
-  const canContinue = Boolean(data.practice && data.practice_type);
+  const canContinue = Boolean(data.practice && data.practice_type && data.slug);
   return (
     <OnboardCard>
       <StepEyebrow>Your practice</StepEyebrow>
@@ -352,8 +467,20 @@ function StepPractice({
           <Input
             id="practice"
             value={data.practice}
-            onChange={(e) => update("practice", e.target.value)}
+            onChange={(e) => updatePractice(e.target.value)}
             placeholder="Karachi Therapy Collective"
+          />
+        </Field>
+        <Field
+          label="Workspace URL"
+          htmlFor="slug"
+          hint="Letters, numbers and hyphens. You can change this later."
+        >
+          <Input
+            id="slug"
+            value={data.slug}
+            onChange={(e) => updateSlug(e.target.value)}
+            placeholder="karachi-therapy"
           />
         </Field>
         <Field label="License number" htmlFor="license" hint="For verification only">
@@ -364,16 +491,15 @@ function StepPractice({
             placeholder="PCP-2847"
           />
         </Field>
-        <Field label="Practice type">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {PRACTICE_TYPES.map((p) => (
-              <ChoiceChip
-                key={p.id}
-                selected={data.practice_type === p.id}
-                onClick={() => update("practice_type", p.id)}
-              >
-                {p.label}
-              </ChoiceChip>
+        <Field label="Plan" hint="30-day free trial · no card needed · change later in settings">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {PRICING_TIERS.map((tier) => (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                selected={data.practice_type === tier.id}
+                onClick={() => update("practice_type", tier.id)}
+              />
             ))}
           </div>
         </Field>
@@ -392,6 +518,11 @@ function StepPractice({
           </div>
         </Field>
       </div>
+      {stepError ? (
+        <p className="text-rose mt-5 text-[13px] font-medium" role="alert">
+          {stepError}
+        </p>
+      ) : null}
       <div className="mt-7">
         <PillButton variant="primary" size="md" disabled={!canContinue} onClick={onNext}>
           Continue <ArrowRight size={15} strokeWidth={1.75} />
@@ -563,7 +694,15 @@ function StepInvite({
   );
 }
 
-function StepDone({ onOpen }: { onOpen: () => void }) {
+function StepDone({
+  onOpen,
+  pending,
+  error,
+}: {
+  onOpen: () => void;
+  pending: boolean;
+  error: string | null;
+}) {
   return (
     <OnboardCard centered>
       <div
@@ -585,9 +724,15 @@ function StepDone({ onOpen }: { onOpen: () => void }) {
         Your account is set up. Briefs become available after a client journals for at least seven
         days.
       </p>
-      <PillButton variant="primary" size="md" onClick={onOpen}>
-        Open my workspace <ArrowRight size={15} strokeWidth={1.75} />
+      <PillButton variant="primary" size="md" onClick={onOpen} disabled={pending}>
+        {pending ? "Creating workspace…" : "Open my workspace"}{" "}
+        {pending ? null : <ArrowRight size={15} strokeWidth={1.75} />}
       </PillButton>
+      {error ? (
+        <p className="text-rose mt-5 text-[13px] font-medium" role="alert">
+          {error}
+        </p>
+      ) : null}
       <p
         className="display-text text-ink-faint mt-6 text-[13px] font-normal italic"
         style={{ letterSpacing: "-0.005em" }}
