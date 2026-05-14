@@ -44,7 +44,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { segment: "today", icon: LayoutDashboard, label: "Today" },
   { segment: "calendar", icon: Calendar, label: "Calendar" },
-  { segment: "clients", icon: Users, label: "Clients", count: 4 },
+  { segment: "clients", icon: Users, label: "Clients" },
   { segment: "suggestions", icon: Sparkles, label: "Suggestions" },
   { segment: "templates", icon: BookOpen, label: "Templates" },
 ];
