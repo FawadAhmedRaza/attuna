@@ -126,6 +126,30 @@ export const clientRepo = {
   },
 
   /**
+   * Anonymous lookup of just the display_name for the client-invite
+   * accept page. The token IS the authorization; we already know the
+   * workspace_id from the invite row. RLS still gates the SELECT by
+   * workspace_id (we set it via withWorkspaceContext), but there is
+   * no userId so clinician isolation isn't applied. The accept row
+   * captures the action itself in audit_log; this lookup is the
+   * supporting display data and is intentionally un-audited.
+   */
+  async findDisplayNameForInvite(
+    db: Database,
+    workspaceId: string,
+    clientId: string,
+  ): Promise<string | null> {
+    return withWorkspaceContext(db, { workspaceId, userId: "" }, async (tx) => {
+      const rows = await tx
+        .select({ displayName: client.displayName })
+        .from(client)
+        .where(eq(client.id, clientId))
+        .limit(1);
+      return rows[0]?.displayName ?? null;
+    });
+  },
+
+  /**
    * Count clients in the workspace, respecting clinician isolation. Cheap
    * helper for sidebars and dashboard tiles. Does not write an audit row —
    * the counts themselves aren't PHI (HIPAA.md §2: "aggregate counts" are
