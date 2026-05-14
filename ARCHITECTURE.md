@@ -85,6 +85,16 @@ workspace_invite
   expires_at      timestamptz
   accepted_at     timestamptz (null)
   invited_by      uuid fk -> user
+
+workspace_survey                         -- onboarding metadata, no PHI, no RLS
+  workspace_id    uuid pk fk -> workspace (cascade)
+  license         text (null)            -- therapist credential, not PHI
+  practice_type   text                   -- 'solo' | 'group' | 'clinic' | 'training'
+  client_count    text (null)            -- '1-10' | '11-25' | '26-50' | '50+'
+  specialty       text[]                 -- e.g. ['Anxiety', 'Trauma']
+  priorities      text[]                 -- selected insight areas
+  created_at      timestamptz
+  updated_at      timestamptz
 ```
 
 Clinical entities (`client`, `entry`, `brief`, `suggestion`, `template`) all carry `workspace_id` and are protected by RLS.

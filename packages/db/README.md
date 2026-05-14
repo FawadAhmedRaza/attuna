@@ -24,10 +24,11 @@ packages/db/
 │   ├── migrate.ts               # CLI: applies migrations
 │   ├── test-setup.ts            # vitest: defaults DATABASE_URL to test DB
 │   ├── schema/                  # one table per file
-│   ├── repositories/            # workspace, member, invite
-│   └── lib/invite-token.ts      # pure crypto helpers (no DB)
+│   ├── repositories/            # workspace, member, invite, user, survey
+│   └── lib/                     # invite-token, slug — pure helpers (no DB)
 └── migrations/
-    ├── 0000_init.sql
+    ├── 0000_init.sql            # user, workspace, workspace_member, workspace_invite
+    ├── 0001_workspace_survey.sql # onboarding survey (no PHI)
     └── meta/_journal.json
 ```
 
@@ -52,12 +53,14 @@ CREATE POLICY tenant_isolation ON client
 
 ## Exceptions to the `WorkspaceContext` rule
 
-Two repo methods take no context because the caller doesn't have one yet:
+A few repo methods take no context because the caller doesn't have one yet:
 
 - `workspaceRepo.create()` — the workspace doesn't exist
 - `memberRepo.acceptInvite()` — caller is signing in for the first time; gated only by a valid invite token
+- `surveyRepo.create()` — onboarding writes the survey row alongside `workspaceRepo.create()` before the owner seat is queryable as a membership
+- `userRepo.upsertFromCognito()` — runs on every sign-in before any workspace is selected
 
-Both are explicitly documented and reviewed any time they change.
+All are explicitly documented and reviewed any time they change.
 
 ## Migrations
 

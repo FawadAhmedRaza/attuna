@@ -5,6 +5,7 @@
   "sideEffects": false,
   "type": "module",
   "exports": {
+    "./pricing-data": "./src/pricing-data.ts",
     "./*": "./src/*.tsx"
   },
   "peerDependencies": {
