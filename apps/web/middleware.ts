@@ -44,5 +44,5 @@ export const config = {
   // Protect onboarding and every workspace-scoped path. The old top-level
   // routes (/today, /clients, etc.) have moved under /w/[slug]/ — middleware
   // no longer matches them so a stale bookmark renders Next's 404.
-  matcher: ["/onboarding/:path*", "/w/:slug/:path*"],
+  matcher: ["/account/:path*", "/onboarding/:path*", "/w/:slug/:path*"],
 };

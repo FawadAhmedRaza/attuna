@@ -200,13 +200,21 @@ export function PortalSidebar({
 
       <div className={["border-border border-t", collapsed ? "p-2" : "p-3.5"].join(" ")}>
         {collapsed ? (
-          <div className="mb-2 flex justify-center" title={`${name} · ${ROLE_LABELS[role]}`}>
+          <Link
+            href="/account"
+            aria-label="Your account"
+            title={`${name} · ${ROLE_LABELS[role]}`}
+            className="hover:bg-bg mb-2 flex justify-center rounded-full p-1 transition-colors"
+          >
             <div className="display bg-warm text-ink-on-accent flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full text-[13px] font-medium">
               {initial}
             </div>
-          </div>
+          </Link>
         ) : (
-          <div className="mb-1.5 flex items-center gap-2.5 px-2.5 py-2">
+          <Link
+            href="/account"
+            className="hover:bg-bg mb-1.5 flex items-center gap-2.5 rounded-[10px] px-2.5 py-2 transition-colors"
+          >
             <div className="display bg-warm text-ink-on-accent flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full text-[13px] font-medium">
               {initial}
             </div>
@@ -224,7 +232,7 @@ export function PortalSidebar({
                 <span>Trial · 28d left</span>
               </div>
             </div>
-          </div>
+          </Link>
         )}
 
         <FooterRow
