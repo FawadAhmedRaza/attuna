@@ -53,6 +53,18 @@ export const workspaceRepo = {
     return rows[0] ?? null;
   },
 
+  /**
+   * Workspace lookup by id WITHOUT a WorkspaceContext. Use only where ctx
+   * isn't available yet: invite acceptance (caller has the workspace_id
+   * from the invite row, not membership yet) or "last-visited workspace"
+   * defaulting. The workspace table itself isn't PHI; ctx-scoped findById
+   * remains the default for normal in-app reads.
+   */
+  async findByIdUnscoped(db: Database, id: string): Promise<Workspace | null> {
+    const rows = await db.select().from(workspace).where(eq(workspace.id, id)).limit(1);
+    return rows[0] ?? null;
+  },
+
   async isSlugAvailable(db: Database, slug: string): Promise<boolean> {
     const existing = await this.findBySlug(db, slug);
     return existing === null;

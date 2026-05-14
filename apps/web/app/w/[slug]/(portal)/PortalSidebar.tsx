@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
+  UserCog,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -50,6 +51,12 @@ const NAV: NavItem[] = [
 
 const ADMIN_NAV: NavItem[] = [
   { segment: "clinic", icon: Building2, label: "Clinic", permission: "view_clinic" },
+  {
+    segment: "settings/members",
+    icon: UserCog,
+    label: "Members",
+    permission: "manage_therapists",
+  },
   { segment: "audit", icon: ScrollText, label: "Audit log", permission: "view_audit" },
   {
     segment: "integrations",

@@ -65,18 +65,22 @@ export async function signInAction(
 
   await setSession(result.subject);
 
-  // First-time users (no workspace yet) land in onboarding; everyone else
-  // goes to /w/{first}/today. We don't carry workspace_id in the session
-  // JWT (ARCHITECTURE §4), so this lookup happens server-side per sign-in.
+  // Routing priority after sign-in:
+  //   1. Honor `next` if it's a known internal path (/w/<slug>/... or
+  //      /invite/<token>). Membership/token validity is rechecked on the
+  //      target page, so we don't try to verify it here.
+  //   2. No memberships yet → /onboarding (unless `next` already pointed
+  //      at /invite/, which we let through above so a new user can join
+  //      via invite without first creating a personal workspace).
+  //   3. Otherwise → first workspace's /today.
+  const next = formData.get("next");
+  if (typeof next === "string" && (next.startsWith("/w/") || next.startsWith("/invite/"))) {
+    redirect(next);
+  }
+
   const memberOf = await workspaceRepo.listForUser(db(), result.subject.userId);
   if (memberOf.length === 0) {
     redirect("/onboarding");
-  }
-  const next = formData.get("next");
-  if (typeof next === "string" && next.startsWith("/w/")) {
-    // Honor `next` only when it's a workspace-scoped path. The gate layout
-    // validates membership for the target slug on render.
-    redirect(next);
   }
   redirect(`/w/${memberOf[0]!.slug}/today`);
 }

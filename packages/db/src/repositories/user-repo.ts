@@ -21,6 +21,16 @@ export const userRepo = {
   },
 
   /**
+   * Email lookup is case-insensitive: the column is `citext`. Used by invite
+   * flows to decide whether to attach a pending invite to an existing user
+   * vs require sign-up first.
+   */
+  async findByEmail(db: Database, email: string): Promise<User | null> {
+    const rows = await db.select().from(user).where(eq(user.email, email)).limit(1);
+    return rows[0] ?? null;
+  },
+
+  /**
    * Mirrors a Cognito user into our `user` table. Idempotent: returns the
    * existing row if the cognito_sub already exists, otherwise inserts.
    * Updates email/name on conflict so a user changing them in Cognito
