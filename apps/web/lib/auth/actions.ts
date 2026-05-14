@@ -4,6 +4,9 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { db } from "@attuna/db/client";
+import { workspaceRepo } from "@attuna/db/repositories/workspace-repo";
+
 import { authClient } from "./client";
 import { sessionCookieOptions, signSessionToken, SESSION_COOKIE_NAME } from "./session";
 
@@ -41,7 +44,7 @@ function fieldError<T extends z.ZodTypeAny>(
   return parsed.error.issues[0]?.message ?? "Invalid input";
 }
 
-async function setSession(subject: { sub: string; email: string; name: string }) {
+async function setSession(subject: { sub: string; userId: string; email: string; name: string }) {
   const token = await signSessionToken(subject);
   cookies().set({ ...sessionCookieOptions(), value: token });
 }
@@ -61,6 +64,15 @@ export async function signInAction(
   if (!result.ok) return { ok: false, error: result.error };
 
   await setSession(result.subject);
+
+  // First-time users (no workspace yet) land in onboarding; everyone else
+  // honors the `next` param or falls through to /today. We check by DB
+  // rather than session because the session JWT doesn't carry workspace
+  // membership state.
+  const memberOf = await workspaceRepo.listForUser(db(), result.subject.userId);
+  if (memberOf.length === 0) {
+    redirect("/onboarding");
+  }
   const next = formData.get("next");
   redirect(typeof next === "string" && next.startsWith("/") ? next : "/today");
 }
@@ -84,6 +96,15 @@ export async function signUpAction(
 }
 
 // ── verify OTP (post-signup) ───────────────────────────────────────
+//
+// Cognito's ConfirmSignUp doesn't return tokens, and we no longer have the
+// user's password at this step (the signup form discarded it). So we mark
+// the email verified and send them through the normal sign-in flow. The
+// signin page shows a confirmation banner via ?verified=1.
+//
+// First sign-in after verification mirrors the Cognito user into our `user`
+// table; the redirect target there is `/onboarding` for users with no
+// workspaces yet (handled in M1 step 3).
 export async function verifyOtpAction(
   _prev: ActionResult | null,
   formData: FormData,
@@ -97,10 +118,7 @@ export async function verifyOtpAction(
   const result = await authClient.verifyOtp(parsed.data);
   if (!result.ok) return { ok: false, error: result.error };
 
-  await setSession(result.subject);
-  // First-time verified users land on onboarding. Returning users come in via
-  // /signin which sends them straight to /today.
-  redirect("/onboarding");
+  redirect(`/signin?verified=1&email=${encodeURIComponent(parsed.data.email)}`);
 }
 
 export async function resendOtpAction(
