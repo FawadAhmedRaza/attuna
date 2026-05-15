@@ -31,7 +31,10 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ title: "Sign in" }} />
+        <Stack.Screen name="sign-up" options={{ title: "Create account" }} />
+        <Stack.Screen name="confirm-email" options={{ title: "Confirm email" }} />
         <Stack.Screen name="c/[token]" options={{ title: "You're invited" }} />
+        <Stack.Screen name="journal" options={{ headerBackVisible: false, title: "Journal" }} />
       </Stack>
     </SafeAreaProvider>
   );

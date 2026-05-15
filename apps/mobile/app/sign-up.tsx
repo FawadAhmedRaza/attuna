@@ -1,12 +1,10 @@
-// Cognito sign-in. If a pending invite token is in SecureStore from
-// the deep-link landing (M2.3b.3 step 1), we call /api/c/link
-// immediately after sign-in succeeds — this consumes the invite + ties
-// the new Cognito sub to the client_user row on our side. The mobile
-// app then stores { workspaceId, clientId, clientUserId } locally so
-// the journal screens can render without another round-trip.
+// Cognito sign-up against the client pool (M2.3b.3). On success
+// Cognito sends a verification code; we navigate to /confirm-email
+// to collect it. The pending invite token (set by /c/[token] earlier)
+// stays in SecureStore until sign-in completes the link.
 
-import { useEffect, useState } from "react";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useState } from "react";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Pressable,
@@ -18,59 +16,35 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { postLink } from "@/lib/api";
-import { signIn } from "@/lib/cognito";
-import { getItem, removeItem, setItem, setLinkedClient } from "@/lib/secure-store";
+import { signUp } from "@/lib/cognito";
+import { setItem } from "@/lib/secure-store";
 import { radius, space, useColors } from "@/theme";
 
-export default function SignIn() {
+export default function SignUp() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { email: emailParam, verified } = useLocalSearchParams<{
-    email?: string;
-    verified?: string;
-  }>();
 
-  const [email, setEmail] = useState(typeof emailParam === "string" ? emailParam : "");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Prefill from SecureStore if we have it (returning user).
-  useEffect(() => {
-    if (email) return;
-    getItem("lastSignedInEmail").then((stored) => {
-      if (stored) setEmail(stored);
-    });
-  }, [email]);
-
   async function onSubmit() {
     if (!email.trim() || !password) {
-      setError("Enter your email + password.");
+      setError("Enter your email + a password.");
       return;
     }
     setError(null);
     setPending(true);
     try {
-      const { idToken } = await signIn(email.trim().toLowerCase(), password);
+      await signUp(email.trim().toLowerCase(), password);
+      // Remember email so the next screen can prefill + so the
+      // re-attempt UX after the email is verified is friction-free.
       await setItem("lastSignedInEmail", email.trim().toLowerCase());
-
-      // If there's a pending invite token from /c/[token], consume it
-      // now. Order matters: the server-side link must succeed before
-      // we let the user past the welcome screen, since downstream
-      // journal calls assume the link is in place.
-      const pendingToken = await getItem("pendingInviteToken");
-      if (pendingToken) {
-        const linked = await postLink({ inviteToken: pendingToken, idToken });
-        await setLinkedClient(linked);
-        await removeItem("pendingInviteToken");
-      }
-
-      // Successful path → journal. (Screen lands in M2.3b.3.C.)
-      router.replace("/journal");
+      router.push(`/confirm-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in failed. Try again.");
+      setError(err instanceof Error ? err.message : "Sign-up failed. Try again.");
     } finally {
       setPending(false);
     }
@@ -89,22 +63,10 @@ export default function SignIn() {
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.heading}>
-        <Text style={[styles.title, { color: colors.ink }]}>Sign in to journal.</Text>
+        <Text style={[styles.title, { color: colors.ink }]}>Create your account.</Text>
         <Text style={[styles.subtitle, { color: colors.inkSoft }]}>
-          Use the email your therapist invited.
+          Use the email your therapist invited. We&apos;ll send you a 6-digit code to confirm.
         </Text>
-        {verified === "1" ? (
-          <View
-            style={[
-              styles.banner,
-              { backgroundColor: colors.accentBg, borderColor: colors.accent },
-            ]}
-          >
-            <Text style={[styles.bannerText, { color: colors.accentDeep }]}>
-              Email verified. Sign in to continue.
-            </Text>
-          </View>
-        ) : null}
       </View>
 
       <View style={styles.form}>
@@ -135,7 +97,7 @@ export default function SignIn() {
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
-            autoComplete="password"
+            autoComplete="password-new"
             style={[
               styles.input,
               { backgroundColor: colors.bgSoft, borderColor: colors.border, color: colors.ink },
@@ -158,15 +120,15 @@ export default function SignIn() {
           {pending ? (
             <ActivityIndicator color={colors.inkOnAccent} />
           ) : (
-            <Text style={[styles.primaryLabel, { color: colors.inkOnAccent }]}>Sign in</Text>
+            <Text style={[styles.primaryLabel, { color: colors.inkOnAccent }]}>Continue</Text>
           )}
         </Pressable>
 
         {error ? <Text style={[styles.error, { color: colors.rose }]}>{error}</Text> : null}
 
-        <Pressable onPress={() => router.push("/sign-up")} hitSlop={12}>
+        <Pressable onPress={() => router.push("/sign-in")} hitSlop={12}>
           <Text style={[styles.secondary, { color: colors.accent }]}>
-            New here? Create an account
+            Already have an account? Sign in
           </Text>
         </Pressable>
       </View>
@@ -200,14 +162,6 @@ const styles = StyleSheet.create({
   heading: { gap: space.sm },
   title: { fontSize: 26, fontWeight: "500", letterSpacing: -0.4 },
   subtitle: { fontSize: 14, lineHeight: 21 },
-  banner: {
-    marginTop: space.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-  },
-  bannerText: { fontSize: 13, fontWeight: "500" },
   form: { gap: space.lg },
   field: { gap: space.xs },
   label: {

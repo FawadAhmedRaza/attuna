@@ -1,32 +1,37 @@
-// Deep-link landing for `attuna://c/<token>` and Universal Links
-// (https://attuna.io/c/<token> → app open). The matching web route at
-// /c/[token] does the actual accept in M2.2b; the mobile flow in
-// M2.3b.3 will:
-//   1. Stash the token in secure storage.
-//   2. Send the user through sign-up if there's no Cognito session.
-//   3. POST /api/c/link { inviteToken, idToken } once Cognito hands
-//      back tokens, which links the new Cognito sub to the
-//      client_user row + stamps custom:client_user_id.
-//
-// For M2.3b.2 we just prove deep linking works by echoing the token.
+// Deep-link landing for `attuna://c/<token>`. Three jobs:
+//   1. Stash the invite token in SecureStore so it survives the
+//      sign-up flow (Cognito takes the user through email confirm,
+//      which may navigate them away — we don't want to lose the
+//      token to a refresh).
+//   2. Tell the user what's happening.
+//   3. Send them to sign-up. After they confirm + sign in, the
+//      sign-in screen calls /api/c/link with the stashed token to
+//      finish the link.
 
+import { useEffect, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { setItem } from "@/lib/secure-store";
 import { radius, space, useColors } from "@/theme";
 
 export default function InviteToken() {
   const { token } = useLocalSearchParams<{ token: string }>();
   const router = useRouter();
   const colors = useColors();
+  const [stashed, setStashed] = useState<"pending" | "ok" | "missing">("pending");
 
-  // Show only the first 8 chars + last 4 — the raw token is a
-  // credential, and even on a paused phone screen we don't want it
-  // fully visible in screenshots.
-  const masked =
-    typeof token === "string" && token.length > 12
-      ? `${token.slice(0, 8)}…${token.slice(-4)}`
-      : "(missing)";
+  useEffect(() => {
+    if (typeof token !== "string" || token.length < 20) {
+      setStashed("missing");
+      return;
+    }
+    setItem("pendingInviteToken", token)
+      .then(() => setStashed("ok"))
+      // Should be unreachable in practice — SecureStore only fails on
+      // OS-level keychain access denial. Surface gracefully.
+      .catch(() => setStashed("missing"));
+  }, [token]);
 
   return (
     <ScrollView
@@ -37,33 +42,46 @@ export default function InviteToken() {
         <Text style={[styles.eyebrow, { color: colors.inkMute }]}>You&apos;re invited</Text>
         <Text style={[styles.title, { color: colors.ink }]}>Join your therapist on Attuna.</Text>
         <Text style={[styles.subtitle, { color: colors.inkSoft }]}>
-          We&apos;ll finish setting up your account after you sign in. Your invite is held securely
-          on this device until then.
+          We&apos;ll finish setting up your account after you create one. Your invite is held
+          securely on this device until then.
         </Text>
       </View>
 
-      <View
-        style={[
-          styles.tokenCard,
-          { backgroundColor: colors.surface, borderColor: colors.borderSoft },
-        ]}
-      >
-        <Text style={[styles.tokenLabel, { color: colors.inkMute }]}>Invite</Text>
-        <Text style={[styles.tokenValue, { color: colors.ink }]}>{masked}</Text>
-        <Text style={[styles.tokenNote, { color: colors.inkFaint }]}>
-          M2.3b.3 wires the real accept flow. For now this screen proves the deep link works.
-        </Text>
-      </View>
+      {stashed === "missing" ? (
+        <View
+          style={[
+            styles.errorCard,
+            { backgroundColor: colors.surface, borderColor: colors.borderSoft },
+          ]}
+        >
+          <Text style={[styles.errorTitle, { color: colors.ink }]}>
+            This invite link is broken.
+          </Text>
+          <Text style={[styles.errorBody, { color: colors.inkSoft }]}>
+            Ask your therapist to send it again.
+          </Text>
+        </View>
+      ) : (
+        <Pressable
+          onPress={() => router.push("/sign-up")}
+          disabled={stashed === "pending"}
+          style={({ pressed }) => [
+            styles.primary,
+            {
+              backgroundColor: pressed ? colors.accentDeep : colors.accent,
+              opacity: stashed === "pending" ? 0.6 : 1,
+            },
+          ]}
+        >
+          <Text style={[styles.primaryLabel, { color: colors.inkOnAccent }]}>
+            {stashed === "pending" ? "Preparing…" : "Create your account"}
+          </Text>
+        </Pressable>
+      )}
 
-      <Pressable
-        onPress={() => router.push("/sign-in")}
-        style={({ pressed }) => [
-          styles.primary,
-          { backgroundColor: pressed ? colors.accentDeep : colors.accent },
-        ]}
-      >
-        <Text style={[styles.primaryLabel, { color: colors.inkOnAccent }]}>
-          Continue to sign in
+      <Pressable onPress={() => router.push("/sign-in")} hitSlop={12}>
+        <Text style={[styles.secondary, { color: colors.accent }]}>
+          Already have an account? Sign in
         </Text>
       </Pressable>
     </ScrollView>
@@ -97,26 +115,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
   },
-  tokenCard: {
+  errorCard: {
     borderRadius: radius.lg,
     borderWidth: 1,
     padding: space.lg,
     gap: space.sm,
   },
-  tokenLabel: {
-    fontSize: 11,
+  errorTitle: {
+    fontSize: 16,
     fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
   },
-  tokenValue: {
-    fontSize: 18,
-    fontFamily: "Menlo",
-    fontWeight: "500",
-  },
-  tokenNote: {
-    fontSize: 12,
-    fontStyle: "italic",
+  errorBody: {
+    fontSize: 13,
+    lineHeight: 20,
   },
   primary: {
     height: 52,
@@ -127,5 +138,10 @@ const styles = StyleSheet.create({
   primaryLabel: {
     fontSize: 16,
     fontWeight: "600",
+  },
+  secondary: {
+    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "500",
   },
 });
