@@ -2,6 +2,7 @@ import { Duration, RemovalPolicy, Stack, StackProps, CfnOutput } from "aws-cdk-l
 import {
   AccountRecovery,
   Mfa,
+  StringAttribute,
   UserPool,
   UserPoolClient,
   UserPoolClientIdentityProvider,
@@ -79,18 +80,41 @@ export class CognitoStack extends Stack {
     });
 
     // ── Client pool ─────────────────────────────────────────────────
-    // Lower-privilege; clients only see their own entries. Self-signup
-    // disabled — therapists invite clients via our own invite token
-    // flow (lands in M2). For now the pool exists but has no entry
-    // path; we'll create users via AdminCreateUser when invites ship.
+    // Lower-privilege; clients only see their own entries. M2.3b.3
+    // mobile flow:
+    //   1. Mobile opens /c/[token] deep link, parses the invite token.
+    //   2. Mobile signs up against this pool (email + password, SRP).
+    //   3. Cognito sends a verification code; user confirms.
+    //   4. Mobile calls /api/c/link with { inviteToken, idToken } —
+    //      our API verifies the token, sets client_user.cognito_sub =
+    //      <new sub>, and AdminUpdateUserAttributes the custom claim
+    //      `custom:client_user_id` to our DB row id.
+    //   5. Subsequent Cognito tokens carry the claim, so the API
+    //      doesn't have to round-trip the DB to know which client_user
+    //      is making a request.
+    //
+    // self-signup is ON for M2.3b but the post-confirmation link step
+    // gates membership. A user who confirms without redeeming an
+    // invite has no client_user row and the API rejects all PHI calls.
     this.clientUserPool = new UserPool(this, "ClientUserPool", {
       userPoolName: `attuna-client-${envName}`,
-      selfSignUpEnabled: false,
+      selfSignUpEnabled: true,
       signInAliases: { email: true, username: false },
       signInCaseSensitive: false,
       standardAttributes: {
         email: { required: true, mutable: true },
-        fullname: { required: false, mutable: true },
+        // No fullname — display_name lives in our `client` row, set by
+        // the therapist. We keep Cognito profile data minimal so it
+        // can't drift from the therapist-set canonical identifier.
+      },
+      // `custom:client_user_id` is the immutable bridge from a Cognito
+      // sub to a `client_user.id` in our Postgres. The API stamps it
+      // once during /api/c/link; mutable=false prevents a compromised
+      // session from re-attaching to a different patient. Min/max
+      // bound the UUID length so the stamp is a no-op if it's already
+      // set.
+      customAttributes: {
+        client_user_id: new StringAttribute({ minLen: 36, maxLen: 36, mutable: false }),
       },
       autoVerify: { email: true },
       userVerification: {
@@ -114,6 +138,11 @@ export class CognitoStack extends Stack {
     this.clientUserPoolClient = this.clientUserPool.addClient("ClientMobileClient", {
       userPoolClientName: `attuna-client-mobile-${envName}`,
       authFlows: {
+        // SRP is the only client-side flow we enable. The mobile app
+        // ships amazon-cognito-identity-js (M2.3b.3) so the password
+        // never reaches our servers. USER_PASSWORD_AUTH is also off in
+        // dev to keep the dev/prod surfaces identical — Expo handles
+        // SRP fine on simulators.
         userSrp: true,
         userPassword: false,
         adminUserPassword: false,
