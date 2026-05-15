@@ -77,4 +77,50 @@ export const clientUserRepo = {
       return rows[0] ?? null;
     });
   },
+
+  /**
+   * Look up by Cognito sub. Used by the API once the mobile app starts
+   * sending Authorization: Bearer <Cognito ID token> — the server
+   * verifies the token, extracts `sub`, and resolves the
+   * client_user_id from this method.
+   *
+   * Unscoped (no workspace context) because the request hasn't proven
+   * a workspace yet; the row carries the workspace_id we then trust
+   * for downstream RLS.
+   */
+  async findByCognitoSubUnscoped(db: Database, cognitoSub: string): Promise<ClientUser | null> {
+    const rows = await db
+      .select()
+      .from(clientUser)
+      .where(eq(clientUser.cognitoSub, cognitoSub))
+      .limit(1);
+    return rows[0] ?? null;
+  },
+
+  /**
+   * Stamp the Cognito sub onto an existing client_user row. Idempotent
+   * when the sub matches; refuses to overwrite if a different sub is
+   * already set (prevents an attacker with a stolen invite token from
+   * stealing a client_user that already belongs to someone else's
+   * Cognito identity).
+   */
+  async setCognitoSubInTx(
+    tx: Transaction,
+    clientUserId: string,
+    cognitoSub: string,
+  ): Promise<void> {
+    const existing = await tx
+      .select({ cognitoSub: clientUser.cognitoSub })
+      .from(clientUser)
+      .where(eq(clientUser.id, clientUserId))
+      .limit(1);
+    const current = existing[0]?.cognitoSub;
+    if (current && current !== cognitoSub) {
+      throw new Error(
+        "client_user already linked to a different Cognito identity — refusing to overwrite",
+      );
+    }
+    if (current === cognitoSub) return; // already linked, idempotent.
+    await tx.update(clientUser).set({ cognitoSub }).where(eq(clientUser.id, clientUserId));
+  },
 };

@@ -22,7 +22,8 @@ This document defines:
 - **AI/LLM use** — what can and cannot be sent to Bedrock (§9)
 - **Breach posture** — what triggers a breach response (§10)
 - **Workforce practices** — passwords, devices, code reviews (§11)
-- **Open items** still requiring sign-off (§12)
+- **Mobile client app** — device storage, push, biometrics (§12)
+- **Open items** still requiring sign-off (§13)
 
 Architectural decisions that intersect with HIPAA live in `ARCHITECTURE.md` §7. This document elaborates the engineering rules; the architecture doc captures the structural choices.
 
@@ -312,7 +313,58 @@ A breach is any unauthorized acquisition, access, use, or disclosure of PHI. Exa
 
 ---
 
-## 12. Open items (need sign-off before going to prod)
+## 12. Mobile client app
+
+This section governs `apps/mobile/`. The mobile app is a PHI surface — a phone in someone's pocket reading their own journal entries. The rules below are stricter than the web's where appropriate (a phone is more easily lost than a laptop).
+
+### What ships in the binary
+
+- **Cognito client pool** identity (M2.3b.3). Sign-in via SRP through `amazon-cognito-identity-js` — passwords never reach our servers.
+- **API client** that hits the same `apps/web` endpoints any other client would, with the Cognito ID token in `Authorization: Bearer <jwt>`. No direct DB access from the device.
+- **Envelope-decryption never runs on-device.** Entry bodies are decrypted server-side and sent over TLS. The mobile app holds plaintext entry bodies in memory only for the lifetime of a screen.
+
+### Device storage
+
+- **`expo-secure-store`** (Keychain on iOS, EncryptedSharedPreferences on Android) for: Cognito refresh tokens, the invite token between deep-link land + sign-up completion. Nothing else.
+- **`AsyncStorage` (unencrypted)** is allowed only for non-PHI UI state: last-used screen, theme override, "have you seen the welcome tour" flag.
+- **No PHI in `AsyncStorage`**, no PHI in any unencrypted on-device cache, no PHI in Expo's filesystem APIs.
+- **Plaintext entries** are kept in React state only. Navigating away from a screen drops them. We do not implement an "offline draft" feature in M2.3b.3 — that lands later with explicit Secure Store encryption + a forced-sync-on-network UX.
+
+### Push notifications (`TBD` until wired)
+
+- Notification **body must be PHI-free**. Generic copy only: "Your therapist sent you a new prompt", "A new brief is ready" (M3+, brief is server-side anyway).
+- Notification **payload (the data dictionary)** carries a deep link (`attuna://...`), not content. The app fetches the actual content over authenticated TLS after the user opens it.
+- Push tokens (`ExpoPushToken`) are PHI-adjacent — tying a token to a client identity is health info. Store in a dedicated table (`client_push_token` when it lands), RLS-protected, deletable on sign-out.
+- Disable push when the user signs out or removes the app — silent push to invalidate is acceptable.
+
+### Biometric / device-level unlock
+
+- **Required pre-prod** but optional for the closed beta. Use `expo-local-authentication` to gate `/journal` once enrolled.
+- If biometric fails / device doesn't have one, fall back to Cognito password re-prompt — never let the app unlock without proof of liveness.
+
+### Lost device / remote sign-out
+
+- Cognito refresh tokens revocable per-device (`enableTokenRevocation: true` already in the stack — M2.3b.1).
+- Add a "Sign out everywhere" affordance in the mobile Settings screen by M5 (closed beta).
+- A stolen device can read whatever's on screen; once locked + outside the OS, the only persisted PHI-adjacent item is the encrypted refresh token, which is rotated on remote sign-out.
+
+### App update / forced update
+
+- Expo OTA updates are fine for non-native JS changes. Mobile **must check for a critical-update flag** at launch and force-update before granting access to PHI screens. Useful for "we found a security bug, please pull this build."
+- The critical-update flag lives in a config endpoint (`/api/config/mobile-min-version`) — not implemented yet, listed as a §12 prod-blocker.
+
+### Logging & analytics on-device
+
+- Same rule as web (§7): no PHI in `console.log`, no third-party analytics SDKs without a BAA. The mobile app's crash reporter must scrub before send (Expo's default sends stack traces + JS error messages — both must be checked manually before turning on the firehose to any provider).
+
+### TLS
+
+- Expo defaults to TLS 1.2+ via the system networking stack. Don't override.
+- Don't accept self-signed certs in any non-development build; the App Transport Security plist for iOS keeps us honest.
+
+---
+
+## 13. Open items (need sign-off before going to prod)
 
 These are tracked here so we don't ship to first paying customer without resolving them. Each blocks production launch but not local development.
 

@@ -229,6 +229,119 @@ describe("clientInviteRepo", () => {
     });
   });
 
+  it("accept with cognitoSub stamps the client_user row + records source=mobile_link", async () => {
+    const owner = await makeUser("acc-mob");
+    const ws = await makeWorkspace(owner.id, "acc-mob-ws");
+    const ctx = ownerCtx(ws.id, owner.id);
+    const c = await clientRepo.create(db, ctx, { displayName: "Mob" });
+    const { token } = await clientInviteRepo.create(db, ctx, {
+      clientId: c.id,
+      email: "mob@example.test",
+    });
+
+    const SUB = "cognito-sub-aaaaaa";
+    const result = await clientInviteRepo.accept(db, token, { cognitoSub: SUB });
+    expect(result?.clientUserId).toBeTruthy();
+
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE attuna_app`);
+      await tx.execute(sql`SELECT set_config('app.current_workspace_id', ${ws.id}, true)`);
+      const { clientUser } = await import("../schema/client-user");
+      const rows = await tx
+        .select()
+        .from(clientUser)
+        .where(eq(clientUser.id, result!.clientUserId));
+      expect(rows[0]?.cognitoSub).toBe(SUB);
+
+      const audits = await tx
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, "client.invite_accept"));
+      const detail = audits[0]?.detail as { source: string; cognito_sub?: string };
+      expect(detail.source).toBe("mobile_link");
+      expect(detail.cognito_sub).toBe(SUB);
+    });
+  });
+
+  it("web-path accept omits cognito_sub and records source=web_accept", async () => {
+    const owner = await makeUser("acc-web");
+    const ws = await makeWorkspace(owner.id, "acc-web-ws");
+    const ctx = ownerCtx(ws.id, owner.id);
+    const c = await clientRepo.create(db, ctx, { displayName: "Web" });
+    const { token } = await clientInviteRepo.create(db, ctx, {
+      clientId: c.id,
+      email: "web@example.test",
+    });
+
+    await clientInviteRepo.accept(db, token);
+
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE attuna_app`);
+      await tx.execute(sql`SELECT set_config('app.current_workspace_id', ${ws.id}, true)`);
+      const rows = await tx
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, "client.invite_accept"));
+      const detail = rows[0]?.detail as { source: string; cognito_sub?: string };
+      expect(detail.source).toBe("web_accept");
+      expect(detail.cognito_sub).toBeUndefined();
+    });
+  });
+
+  it("setCognitoSubInTx refuses to overwrite a different sub (steal-prevention)", async () => {
+    const owner = await makeUser("steal");
+    const ws = await makeWorkspace(owner.id, "steal-ws");
+    const ctx = ownerCtx(ws.id, owner.id);
+    const c = await clientRepo.create(db, ctx, { displayName: "S" });
+    const { token } = await clientInviteRepo.create(db, ctx, {
+      clientId: c.id,
+      email: "s@example.test",
+    });
+
+    // First accept lands sub A.
+    const r1 = await clientInviteRepo.accept(db, token, { cognitoSub: "sub-A" });
+    expect(r1).toBeTruthy();
+
+    // A second invite for the same client + a different sub — the
+    // accept itself succeeds (a fresh token consumes correctly), but
+    // setCognitoSubInTx throws when it tries to overwrite the
+    // existing sub with sub-B. The whole transaction rolls back; the
+    // invite stays unconsumed.
+    const { token: token2 } = await clientInviteRepo.create(db, ctx, {
+      clientId: c.id,
+      email: "s@example.test",
+    });
+    await expect(clientInviteRepo.accept(db, token2, { cognitoSub: "sub-B" })).rejects.toThrow(
+      /already linked/,
+    );
+
+    // The original sub is still in place; the second invite is still
+    // open (rolled back).
+    const second = await clientInviteRepo.findByToken(db, token2);
+    expect(second).not.toBeNull();
+  });
+
+  it("findByCognitoSubUnscoped resolves a linked client_user", async () => {
+    const owner = await makeUser("find-sub");
+    const ws = await makeWorkspace(owner.id, "find-sub-ws");
+    const ctx = ownerCtx(ws.id, owner.id);
+    const c = await clientRepo.create(db, ctx, { displayName: "F" });
+    const { token } = await clientInviteRepo.create(db, ctx, {
+      clientId: c.id,
+      email: "f@example.test",
+    });
+    const r = await clientInviteRepo.accept(db, token, { cognitoSub: "sub-find-me" });
+    if (!r) throw new Error("accept failed");
+
+    const { clientUserRepo } = await import("./client-user-repo");
+    const found = await clientUserRepo.findByCognitoSubUnscoped(db, "sub-find-me");
+    expect(found?.id).toBe(r.clientUserId);
+    expect(found?.clientId).toBe(c.id);
+
+    const missing = await clientUserRepo.findByCognitoSubUnscoped(db, "sub-nope");
+    expect(missing).toBeNull();
+  });
+
   it("listPendingForClient is RLS-application-scoped: hides other workspaces", async () => {
     const ownerA = await makeUser("lp-a");
     const ownerB = await makeUser("lp-b");
