@@ -1,9 +1,17 @@
 "use server";
 
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { db } from "@attuna/db/client";
 import { clientInviteRepo } from "@attuna/db/repositories/client-invite-repo";
+
+import {
+  CLIENT_SESSION_COOKIE_NAME,
+  clientSessionCookieOptions,
+  signClientSession,
+} from "@/lib/auth/client-session";
 
 export type AcceptClientInviteResult =
   | { ok: true; workspaceName?: string }
@@ -14,12 +22,12 @@ const tokenSchema = z.string().min(20).max(120);
 // Anonymous accept. Runs signed-out — the token IS the credential.
 // `clientInviteRepo.accept` does an idempotent transaction: validates the
 // token-hash + expiry + acceptedAt, marks the invite consumed, flips the
-// parent client.status to 'active', and writes an anonymous audit row
-// with actor_role='client', actor_user_id=null.
+// parent client.status to 'active', provisions a client_user row, and
+// writes an anonymous audit row.
 //
-// No Cognito identity is created here. The mobile app will own that
-// flow in M2.3; for now this is just the proof-of-life that the invite
-// was redeemed.
+// On success: sign an `atn_c` cookie carrying (workspace_id, client_id,
+// client_user_id) and redirect to /j. M2.3b will replace the cookie
+// signing here with a Cognito client-pool sign-in.
 export async function acceptClientInviteAction(
   _prev: AcceptClientInviteResult | null,
   formData: FormData,
@@ -33,5 +41,24 @@ export async function acceptClientInviteAction(
   if (!result) {
     return { ok: false, error: "This invitation is no longer valid." };
   }
-  return { ok: true };
+
+  const session = await signClientSession({
+    clientUserId: result.clientUserId,
+    clientId: result.clientId,
+    workspaceId: result.workspaceId,
+  });
+  cookies().set({ ...clientSessionCookieOptions(), value: session });
+
+  // Server-side redirect. redirect() throws NEXT_REDIRECT, which is
+  // caught by the action runtime and surfaces as an HTTP 303 — the
+  // form submits, the cookie sticks, and the browser lands on /j.
+  redirect("/j");
+}
+
+// Sign-out for the client web surface — clears the atn_c cookie and
+// sends them home. The therapist's separate session (attuna_session)
+// is untouched, since the two surfaces never share a user.
+export async function signOutClientAction(): Promise<void> {
+  cookies().delete(CLIENT_SESSION_COOKIE_NAME);
+  redirect("/");
 }

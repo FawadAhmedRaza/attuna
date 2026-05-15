@@ -45,8 +45,10 @@ function devMasterKey(): Buffer {
   // a tampered .env that drops AUTH_SESSION_SECRET would silently fall
   // through to a known wrap key. With the secret as the seed, missing
   // the secret in prod throws (per session.ts), and in dev the fallback
-  // string is used everywhere.
-  const seed = process.env.AUTH_SESSION_SECRET ?? "dev-only-fallback-secret-change-me-at-least-32b";
+  // string is used everywhere. Empty string is treated as "missing" —
+  // .env.local often has `AUTH_SESSION_SECRET=` which loads as empty.
+  const raw = process.env.AUTH_SESSION_SECRET;
+  const seed = raw && raw.length > 0 ? raw : "dev-only-fallback-secret-change-me-at-least-32b";
   // Hash-stretch to 32 bytes via SHA-256.
   // (Avoid pulling in a KDF library for a dev shim.)
   const { createHash } = require("node:crypto") as typeof import("node:crypto");

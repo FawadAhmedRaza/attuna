@@ -9,13 +9,14 @@
 // clinician-scoped filter. If the client isn't visible, we never touch
 // the entry table.
 
-import { asc, eq } from "drizzle-orm";
+import { asc, count, desc, eq, max } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
-import type { AuditContext, Database } from "../context";
+import type { AuditContext, Database, Transaction } from "../context";
 import { withWorkspaceContext } from "../context";
 import { decryptEnvelope, encryptEnvelope, entryAad } from "../lib/envelope";
 import type { KmsClient } from "../lib/kms";
+import { auditLog, type NewAuditLog } from "../schema/audit-log";
 import { entry as entryTable, type Entry } from "../schema/entry";
 
 import { auditRepo } from "./audit-repo";
@@ -51,6 +52,18 @@ function toDecrypted(row: Entry, body: string): DecryptedEntry {
     writtenAt: row.writtenAt,
     createdAt: row.createdAt,
   };
+}
+
+// Local helper: write an audit row for an anonymous actor (the
+// patient themselves). actor_user_id is null and actor_role is
+// "client". Same shape as the workspace_invite/client_invite anonymous
+// audit writes; kept local rather than added to auditRepo because the
+// AuditContext type carries a strict WorkspaceRole.
+async function writeAnonymousAuditInTx(
+  tx: Transaction,
+  input: Omit<NewAuditLog, "id" | "createdAt">,
+): Promise<void> {
+  await tx.insert(auditLog).values(input);
 }
 
 export const entryRepo = {
@@ -165,6 +178,159 @@ export const entryRepo = {
     // sequential reads of the GCM tags, but the consumer wants newest first.
     decrypted.sort((a, b) => b.writtenAt.getTime() - a.writtenAt.getTime());
     return decrypted;
+  },
+
+  // ────────────────────────────────────────────────────────────────
+  // Client-side path (the patient writing their own entries)
+  // ────────────────────────────────────────────────────────────────
+
+  /**
+   * Write a journal entry as the client themselves. Authorization is
+   * the `atn_c` cookie verified by the caller — we trust the
+   * (workspaceId, clientId, clientUserId) tuple as already proven by
+   * cookie signature validation. The audit row uses actor_role='client'
+   * with actor_user_id=null and the client_user_id in detail.
+   */
+  async createAsClient(
+    db: Database,
+    kms: KmsClient,
+    actor: { workspaceId: string; clientId: string; clientUserId: string },
+    body: string,
+    writtenAt: Date,
+  ): Promise<DecryptedEntry> {
+    const entryId = randomUUID();
+    const aad = entryAad(actor.workspaceId, actor.clientId, entryId);
+    const enc = await encryptEnvelope(kms, body, aad);
+    const wordCount = countWords(body);
+
+    return withWorkspaceContext(db, { workspaceId: actor.workspaceId, userId: "" }, async (tx) => {
+      const [created] = await tx
+        .insert(entryTable)
+        .values({
+          id: entryId,
+          workspaceId: actor.workspaceId,
+          clientId: actor.clientId,
+          bodyCiphertext: enc.ciphertext,
+          bodyNonce: enc.nonce,
+          bodyWrappedKey: enc.wrappedKey,
+          bodyAad: aad,
+          wordCount,
+          writtenAt,
+        })
+        .returning();
+      if (!created) {
+        throw new Error("Failed to insert entry");
+      }
+      await writeAnonymousAuditInTx(tx, {
+        workspaceId: actor.workspaceId,
+        actorUserId: null,
+        actorRole: "client",
+        action: "entry.create",
+        targetType: "entry",
+        targetId: created.id,
+        detail: {
+          client_id: actor.clientId,
+          client_user_id: actor.clientUserId,
+          word_count: wordCount,
+        },
+        ip: null,
+        userAgent: null,
+      });
+      return toDecrypted(created, body);
+    });
+  },
+
+  /**
+   * List + decrypt entries for the client themselves. Same auth model
+   * as createAsClient — caller has already verified the atn_c cookie.
+   */
+  async listAsClient(
+    db: Database,
+    kms: KmsClient,
+    actor: { workspaceId: string; clientId: string; clientUserId: string },
+  ): Promise<DecryptedEntry[]> {
+    const rows = await withWorkspaceContext(
+      db,
+      { workspaceId: actor.workspaceId, userId: "" },
+      async (tx) => {
+        const r = await tx
+          .select()
+          .from(entryTable)
+          .where(eq(entryTable.clientId, actor.clientId))
+          .orderBy(asc(entryTable.writtenAt));
+        await writeAnonymousAuditInTx(tx, {
+          workspaceId: actor.workspaceId,
+          actorUserId: null,
+          actorRole: "client",
+          action: "entry.list",
+          targetType: "entry",
+          targetId: null,
+          detail: {
+            client_id: actor.clientId,
+            client_user_id: actor.clientUserId,
+            count: r.length,
+          },
+          ip: null,
+          userAgent: null,
+        });
+        return r;
+      },
+    );
+    const decrypted = await Promise.all(
+      rows.map(async (row) => {
+        const body = await decryptEnvelope(
+          kms,
+          {
+            ciphertext: row.bodyCiphertext,
+            nonce: row.bodyNonce,
+            wrappedKey: row.bodyWrappedKey,
+          },
+          row.bodyAad,
+        );
+        return toDecrypted(row, body);
+      }),
+    );
+    decrypted.sort((a, b) => b.writtenAt.getTime() - a.writtenAt.getTime());
+    return decrypted;
+  },
+
+  /**
+   * Therapist-side summary: total entries + last-written date for a
+   * client. Doesn't decrypt — only metadata. Useful for the client
+   * detail page card. Writes an entry.list audit row with the count
+   * for parity with the regular list path.
+   */
+  async summaryForClient(
+    db: Database,
+    ctx: AuditContext,
+    clientId: string,
+  ): Promise<{ total: number; lastWrittenAt: Date | null }> {
+    // Visibility check via clientRepo respects clinician isolation;
+    // returns nothing if the caller can't see the parent client.
+    const parent = await clientRepo.findById(db, ctx, clientId);
+    if (!parent) {
+      return { total: 0, lastWrittenAt: null };
+    }
+
+    return withWorkspaceContext(db, ctx, async (tx) => {
+      const [row] = await tx
+        .select({
+          total: count(entryTable.id),
+          lastWrittenAt: max(entryTable.writtenAt),
+        })
+        .from(entryTable)
+        .where(eq(entryTable.clientId, clientId));
+      const summary = {
+        total: Number(row?.total ?? 0),
+        lastWrittenAt: row?.lastWrittenAt ?? null,
+      };
+      await auditRepo.writeInTx(tx, ctx, {
+        action: "entry.list",
+        targetType: "entry",
+        detail: { client_id: clientId, count: summary.total, mode: "summary_only" },
+      });
+      return summary;
+    });
   },
 
   /**

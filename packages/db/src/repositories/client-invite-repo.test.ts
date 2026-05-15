@@ -141,7 +141,12 @@ describe("clientInviteRepo", () => {
     });
 
     const result = await clientInviteRepo.accept(db, token);
-    expect(result).toEqual({ workspaceId: ws.id, clientId: c.id });
+    expect(result?.workspaceId).toBe(ws.id);
+    expect(result?.clientId).toBe(c.id);
+    // M2.3a: accept also provisions a client_user row that the cookie
+    // will bind to. The id is returned so the action layer can sign it
+    // into the atn_c cookie.
+    expect(result?.clientUserId).toMatch(/^[0-9a-f-]{36}$/);
 
     // Client is now active.
     const after = await clientRepo.findById(db, ctx, c.id);
@@ -164,7 +169,9 @@ describe("clientInviteRepo", () => {
       expect(rows[0]?.actorUserId).toBeNull();
       expect(rows[0]?.actorRole).toBe("client");
       expect(rows[0]?.targetId).toBe(c.id);
-      expect(rows[0]?.detail).toEqual({ invite_id: invite.id });
+      const detail = rows[0]?.detail as { invite_id: string; client_user_id: string };
+      expect(detail.invite_id).toBe(invite.id);
+      expect(detail.client_user_id).toBe(result?.clientUserId);
     });
   });
 
