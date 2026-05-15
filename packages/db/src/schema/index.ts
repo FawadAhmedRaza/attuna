@@ -5,5 +5,6 @@ export * from "./workspace-invite";
 export * from "./workspace-survey";
 export * from "./client";
 export * from "./client-invite";
+export * from "./client-user";
 export * from "./entry";
 export * from "./audit-log";

@@ -10,7 +10,7 @@
 //     audit row for the acceptance is written by `accept()` once it
 //     has a workspace_id from the looked-up row.
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
 import type { AuditContext, Database, Transaction, WorkspaceContext } from "../context";
 import { withWorkspaceContext } from "../context";
@@ -20,6 +20,7 @@ import { client as clientTable } from "../schema/client";
 import { clientInvite, type ClientInvite, type NewClientInvite } from "../schema/client-invite";
 
 import { auditRepo } from "./audit-repo";
+import { clientUserRepo } from "./client-user-repo";
 
 export interface CreateClientInviteInput {
   readonly clientId: string;
@@ -156,44 +157,76 @@ export const clientInviteRepo = {
   async accept(
     db: Database,
     token: string,
-  ): Promise<{ workspaceId: string; clientId: string } | null> {
-    return db.transaction(async (tx) => {
-      const tokenHash = hashInviteToken(token);
-      const rows = await tx
-        .select()
-        .from(clientInvite)
-        .where(eq(clientInvite.tokenHash, tokenHash))
-        .limit(1);
-      const row = rows[0];
-      if (!row) return null;
-      if (row.acceptedAt) return null;
-      if (isInviteExpired(row.expiresAt)) return null;
+  ): Promise<{ workspaceId: string; clientId: string; clientUserId: string } | null> {
+    // Initial token lookup runs unscoped — workspace_id is unknown at
+    // this point. `client_invite` has no RLS so this works for both the
+    // dev superuser and a prod non-superuser app role.
+    const tokenHash = hashInviteToken(token);
+    const initial = await db
+      .select()
+      .from(clientInvite)
+      .where(eq(clientInvite.tokenHash, tokenHash))
+      .limit(1);
+    const lookup = initial[0];
+    if (!lookup) return null;
+    if (lookup.acceptedAt) return null;
+    if (isInviteExpired(lookup.expiresAt)) return null;
 
-      await tx
+    // Writes happen inside withWorkspaceContext (which SET LOCAL ROLE
+    // attuna_app and sets `app.current_workspace_id`) so the RLS
+    // policies on `client`, `client_user`, and `audit_log` approve the
+    // operations. userId is empty — the actor is the anonymous invitee.
+    return withWorkspaceContext(db, { workspaceId: lookup.workspaceId, userId: "" }, async (tx) => {
+      // Re-validate inside the tx so a concurrent accept can't double-
+      // consume the invite. UPDATE...RETURNING also gives us the row
+      // back; we can detect "already accepted by a racing request"
+      // when the RETURNING set is empty.
+      const stillOpen = await tx
         .update(clientInvite)
         .set({ acceptedAt: new Date() })
-        .where(eq(clientInvite.id, row.id));
+        .where(and(eq(clientInvite.id, lookup.id), isNull(clientInvite.acceptedAt)))
+        .returning();
+      if (stillOpen.length === 0) {
+        // Lost the race — another request just consumed the token.
+        return null;
+      }
+
       await tx
         .update(clientTable)
         .set({ status: "active" })
-        .where(eq(clientTable.id, row.clientId));
+        .where(eq(clientTable.id, lookup.clientId));
+
+      // Provision (or fetch) the client_user row that the cookie will
+      // bind the browser to. Idempotent: re-accepts of the same
+      // client (e.g. lost device + reinstall after a fresh invite)
+      // reuse the existing row rather than creating a parallel
+      // identity.
+      const cu = await clientUserRepo.createForInviteInTx(tx, {
+        workspaceId: lookup.workspaceId,
+        clientId: lookup.clientId,
+      });
 
       // Anonymous audit — workspace_id is known from the invite, but
-      // actor_user_id is null and actor_role is "client" since there's
-      // no Cognito identity yet.
+      // actor_user_id is null and actor_role is "client" since there
+      // is no Cognito identity yet. The client_user_id goes in
+      // detail so future audits can correlate.
       await writeAnonymousAuditInTx(tx, {
-        workspaceId: row.workspaceId,
+        workspaceId: lookup.workspaceId,
         actorUserId: null,
         actorRole: "client",
         action: "client.invite_accept",
         targetType: "client",
-        targetId: row.clientId,
-        detail: { invite_id: row.id },
+        targetId: lookup.clientId,
+        detail: { invite_id: lookup.id, client_user_id: cu.id },
         ip: null,
         userAgent: null,
       });
 
-      return { workspaceId: row.workspaceId, clientId: row.clientId };
+      return {
+        workspaceId: lookup.workspaceId,
+        clientId: lookup.clientId,
+        clientUserId: cu.id,
+      };
     });
   },
 };
