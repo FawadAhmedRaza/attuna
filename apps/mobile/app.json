@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Attuna",
+    "slug": "attuna",
+    "scheme": "attuna",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "io.attuna.client"
+    },
+    "android": {
+      "package": "io.attuna.client",
+      "adaptiveIcon": {
+        "backgroundColor": "#F8F7F2"
+      }
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
