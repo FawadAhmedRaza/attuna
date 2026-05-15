@@ -157,6 +157,7 @@ export const clientInviteRepo = {
   async accept(
     db: Database,
     token: string,
+    options: { cognitoSub?: string } = {},
   ): Promise<{ workspaceId: string; clientId: string; clientUserId: string } | null> {
     // Initial token lookup runs unscoped — workspace_id is unknown at
     // this point. `client_invite` has no RLS so this works for both the
@@ -196,8 +197,8 @@ export const clientInviteRepo = {
         .set({ status: "active" })
         .where(eq(clientTable.id, lookup.clientId));
 
-      // Provision (or fetch) the client_user row that the cookie will
-      // bind the browser to. Idempotent: re-accepts of the same
+      // Provision (or fetch) the client_user row that the cookie /
+      // Cognito sub will bind to. Idempotent: re-accepts of the same
       // client (e.g. lost device + reinstall after a fresh invite)
       // reuse the existing row rather than creating a parallel
       // identity.
@@ -206,10 +207,29 @@ export const clientInviteRepo = {
         clientId: lookup.clientId,
       });
 
-      // Anonymous audit — workspace_id is known from the invite, but
-      // actor_user_id is null and actor_role is "client" since there
-      // is no Cognito identity yet. The client_user_id goes in
-      // detail so future audits can correlate.
+      // M2.3b.3 mobile path: if the caller passed a Cognito sub
+      // (because they already signed up + got an ID token), stamp it
+      // now in the same transaction as the invite consume. Web accept
+      // omits this — atn_c cookie carries the identity until M2.3c.
+      if (options.cognitoSub) {
+        await clientUserRepo.setCognitoSubInTx(tx, cu.id, options.cognitoSub);
+      }
+
+      // Anonymous audit — actor_user_id stays null (the `user` table
+      // is therapist identities). actor_role='client' marks the patient
+      // themselves as the actor. cognito_sub goes in detail when the
+      // mobile path supplied it; correlating sub → client_user is
+      // otherwise a join hop.
+      const detail: Record<string, unknown> = {
+        invite_id: lookup.id,
+        client_user_id: cu.id,
+      };
+      if (options.cognitoSub) {
+        detail.cognito_sub = options.cognitoSub;
+        detail.source = "mobile_link";
+      } else {
+        detail.source = "web_accept";
+      }
       await writeAnonymousAuditInTx(tx, {
         workspaceId: lookup.workspaceId,
         actorUserId: null,
@@ -217,7 +237,7 @@ export const clientInviteRepo = {
         action: "client.invite_accept",
         targetType: "client",
         targetId: lookup.clientId,
-        detail: { invite_id: lookup.id, client_user_id: cu.id },
+        detail,
         ip: null,
         userAgent: null,
       });
