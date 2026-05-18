@@ -1,24 +1,103 @@
-// Placeholder journal screen for M2.3b.3.B. Confirms the auth +
-// link flow worked end-to-end by displaying the linked client info
-// from SecureStore. The real list + write UI lands in M2.3b.3.C
-// against the /api/entries endpoint.
+// Real journal screen (M2.3b.3.C). Lists the client's own entries
+// decrypted by the server and lets them write a new one. The
+// /api/entries calls go through lib/api which attaches the Cognito
+// ID token. HIPAA §12: bodies never persist to AsyncStorage; they
+// live in React state for the lifetime of the screen.
 
-import { useEffect, useState } from "react";
-import { useRouter } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { createEntry, type Entry, listEntries } from "@/lib/api";
 import { signOutCurrent } from "@/lib/cognito";
-import { clearAll, getLinkedClient, type LinkedClient } from "@/lib/secure-store";
+import { clearAll } from "@/lib/secure-store";
 import { radius, space, useColors } from "@/theme";
+
+type LoadState =
+  | { kind: "loading" }
+  | { kind: "ready"; entries: Entry[] }
+  | { kind: "error"; message: string };
 
 export default function Journal() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [linked, setLinked] = useState<LinkedClient | null | "loading">("loading");
 
-  useEffect(() => {
-    getLinkedClient().then(setLinked);
+  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [refreshing, setRefreshing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const entries = await listEntries();
+      setState({ kind: "ready", entries });
+    } catch (err) {
+      setState({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Couldn't load your entries.",
+      });
+    }
   }, []);
+
+  // Refresh when the screen first mounts and whenever it regains focus
+  // (e.g. user backgrounded + reopened the app). useFocusEffect's
+  // callback runs on every focus; we keep the loading state on first
+  // mount and use the RefreshControl spinner for subsequent reloads.
+  useEffect(() => {
+    void load();
+  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      if (state.kind === "ready") {
+        // Cheap re-fetch on re-focus; the screen already has content
+        // to display while we wait.
+        void load();
+      }
+      // We intentionally don't depend on `load` here — recreating it
+      // each render would trigger a refetch on every state change.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+
+  async function onPullToRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function onSubmit() {
+    if (!draft.trim()) {
+      setSubmitError("Write a little something first.");
+      return;
+    }
+    setSubmitError(null);
+    setSubmitting(true);
+    try {
+      const created = await createEntry({ body: draft, writtenAt: new Date() });
+      setDraft("");
+      setState((prev) =>
+        prev.kind === "ready"
+          ? { kind: "ready", entries: [created, ...prev.entries] }
+          : { kind: "ready", entries: [created] },
+      );
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Couldn't save. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function onSignOut() {
     signOutCurrent();
@@ -27,105 +106,280 @@ export default function Journal() {
   }
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.bg }]}>
+    <ScrollView
+      contentContainerStyle={[
+        styles.container,
+        {
+          backgroundColor: colors.bg,
+          paddingTop: space.lg,
+          paddingBottom: insets.bottom + space.xxl,
+        },
+      ]}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onPullToRefresh}
+          tintColor={colors.inkMute}
+        />
+      }
+    >
       <View style={styles.heading}>
-        <Text style={[styles.title, { color: colors.ink }]}>You&apos;re in.</Text>
+        <Text style={[styles.title, { color: colors.ink }]}>Your journal.</Text>
         <Text style={[styles.subtitle, { color: colors.inkSoft }]}>
-          The full journal UI (write + list of your own encrypted entries) lands in M2.3b.3.C. For
-          now this screen confirms the Cognito sign-in + /api/c/link round-trip worked.
+          Only your therapist can read these. Encrypted before they leave your phone.
         </Text>
       </View>
 
       <View
-        style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSoft }]}
+        style={[
+          styles.composer,
+          { backgroundColor: colors.surface, borderColor: colors.borderSoft },
+        ]}
       >
-        <Text style={[styles.cardLabel, { color: colors.inkMute }]}>Linked client</Text>
-        {linked === "loading" ? (
-          <Text style={[styles.value, { color: colors.inkFaint }]}>…</Text>
-        ) : linked === null ? (
-          <Text style={[styles.value, { color: colors.rose }]}>
-            No linked client — try the invite link again.
+        <Text style={[styles.composerLabel, { color: colors.inkMute }]}>
+          What&apos;s on your mind?
+        </Text>
+        <TextInput
+          value={draft}
+          onChangeText={setDraft}
+          placeholder="Today went…"
+          placeholderTextColor={colors.inkFaint}
+          multiline
+          editable={!submitting}
+          style={[styles.composerInput, { color: colors.ink }]}
+        />
+        <View style={styles.composerActions}>
+          <Text style={[styles.composerHint, { color: colors.inkFaint }]}>
+            Three sentences is plenty.
           </Text>
-        ) : (
-          <View style={styles.kv}>
-            <KV label="Workspace" value={linked.workspaceId} colors={colors} />
-            <KV label="Client" value={linked.clientId} colors={colors} />
-            <KV label="Client user" value={linked.clientUserId} colors={colors} />
-          </View>
-        )}
+          <Pressable
+            onPress={onSubmit}
+            disabled={submitting || !draft.trim()}
+            style={({ pressed }) => [
+              styles.saveBtn,
+              {
+                backgroundColor: pressed ? colors.accentDeep : colors.accent,
+                opacity: submitting || !draft.trim() ? 0.6 : 1,
+              },
+            ]}
+          >
+            {submitting ? (
+              <ActivityIndicator color={colors.inkOnAccent} />
+            ) : (
+              <Text style={[styles.saveLabel, { color: colors.inkOnAccent }]}>Save</Text>
+            )}
+          </Pressable>
+        </View>
+        {submitError ? (
+          <Text style={[styles.error, { color: colors.rose }]}>{submitError}</Text>
+        ) : null}
       </View>
+
+      <EntriesBlock state={state} colors={colors} onRetry={load} />
 
       <Pressable
         onPress={onSignOut}
         style={({ pressed }) => [
-          styles.secondaryBtn,
+          styles.signOutBtn,
           { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
         ]}
       >
-        <Text style={[styles.secondaryLabel, { color: colors.inkSoft }]}>Sign out</Text>
+        <Text style={[styles.signOutLabel, { color: colors.inkSoft }]}>Sign out</Text>
       </Pressable>
     </ScrollView>
   );
 }
 
-function KV({
-  label,
-  value,
+function EntriesBlock({
+  state,
   colors,
+  onRetry,
 }: {
-  label: string;
-  value: string;
+  state: LoadState;
   colors: ReturnType<typeof useColors>;
+  onRetry: () => void;
 }) {
+  if (state.kind === "loading") {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={colors.inkMute} />
+      </View>
+    );
+  }
+  if (state.kind === "error") {
+    return (
+      <View
+        style={[
+          styles.errorCard,
+          { backgroundColor: colors.surface, borderColor: colors.borderSoft },
+        ]}
+      >
+        <Text style={[styles.errorTitle, { color: colors.ink }]}>Couldn&apos;t load.</Text>
+        <Text style={[styles.errorBody, { color: colors.inkSoft }]}>{state.message}</Text>
+        <Pressable
+          onPress={onRetry}
+          style={({ pressed }) => [
+            styles.retryBtn,
+            { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+          ]}
+        >
+          <Text style={[styles.retryLabel, { color: colors.accent }]}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  if (state.entries.length === 0) {
+    return (
+      <View
+        style={[
+          styles.emptyCard,
+          { backgroundColor: colors.surface, borderColor: colors.borderSoft },
+        ]}
+      >
+        <Text style={[styles.emptyBody, { color: colors.inkSoft }]}>
+          No entries yet. Write your first one above whenever you&apos;re ready.
+        </Text>
+      </View>
+    );
+  }
   return (
-    <View style={styles.kvRow}>
-      <Text style={[styles.kvLabel, { color: colors.inkMute }]}>{label}</Text>
-      <Text style={[styles.kvValue, { color: colors.ink }]} numberOfLines={1}>
-        {value}
-      </Text>
+    <View style={styles.list}>
+      <View style={styles.listHeader}>
+        <Text style={[styles.listHeading, { color: colors.ink }]}>Your entries</Text>
+        <Text style={[styles.listCount, { color: colors.inkMute }]}>{state.entries.length}</Text>
+      </View>
+      {state.entries.map((e) => (
+        <View
+          key={e.id}
+          style={[
+            styles.entryCard,
+            { backgroundColor: colors.surface, borderColor: colors.borderSoft },
+          ]}
+        >
+          <Text style={[styles.entryMeta, { color: colors.inkMute }]}>
+            {prettyDate(e.writtenAt)} · {e.wordCount} {e.wordCount === 1 ? "word" : "words"}
+          </Text>
+          <Text style={[styles.entryBody, { color: colors.ink }]}>{e.body}</Text>
+        </View>
+      ))}
     </View>
   );
+}
+
+function prettyDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     paddingHorizontal: space.xl,
-    paddingTop: space.xl,
-    paddingBottom: space.xxl,
-    gap: space.xxl,
+    gap: space.xl,
   },
-  heading: { gap: space.md },
-  title: { fontSize: 26, fontWeight: "500", letterSpacing: -0.4 },
-  subtitle: { fontSize: 14, lineHeight: 21 },
-  card: {
+  heading: { gap: space.sm },
+  title: { fontSize: 24, fontWeight: "500", letterSpacing: -0.4 },
+  subtitle: { fontSize: 13, lineHeight: 20 },
+  composer: {
     borderRadius: radius.lg,
     borderWidth: 1,
     padding: space.lg,
     gap: space.sm,
   },
-  cardLabel: {
+  composerLabel: {
     fontSize: 11,
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
-  value: { fontSize: 14, fontWeight: "500" },
-  kv: { gap: space.sm, marginTop: space.xs },
-  kvRow: { flexDirection: "row", gap: space.md, alignItems: "baseline" },
-  kvLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    width: 90,
+  composerInput: {
+    minHeight: 120,
+    fontSize: 15,
+    lineHeight: 22,
+    paddingVertical: space.xs,
+    textAlignVertical: "top",
   },
-  kvValue: { fontSize: 12, fontFamily: "Menlo", flex: 1 },
-  secondaryBtn: {
-    height: 48,
+  composerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space.md,
+    marginTop: space.xs,
+  },
+  composerHint: { fontSize: 11, fontStyle: "italic", flexShrink: 1 },
+  saveBtn: {
+    height: 40,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 88,
+  },
+  saveLabel: { fontSize: 14, fontWeight: "600" },
+  error: { fontSize: 13, fontWeight: "500" },
+  loading: {
+    paddingVertical: space.xxl,
+    alignItems: "center",
+  },
+  list: { gap: space.md },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: space.sm,
+    paddingHorizontal: space.xs,
+  },
+  listHeading: { fontSize: 16, fontWeight: "600", letterSpacing: -0.2 },
+  listCount: { fontSize: 13, fontWeight: "500" },
+  entryCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: space.lg,
+    gap: space.sm,
+  },
+  entryMeta: { fontSize: 11, fontWeight: "500" },
+  entryBody: { fontSize: 15, lineHeight: 23 },
+  emptyCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: space.xl,
+    alignItems: "center",
+  },
+  emptyBody: { fontSize: 14, textAlign: "center", lineHeight: 21 },
+  errorCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    padding: space.lg,
+    gap: space.sm,
+  },
+  errorTitle: { fontSize: 15, fontWeight: "600" },
+  errorBody: { fontSize: 13, lineHeight: 20 },
+  retryBtn: {
+    height: 40,
     borderRadius: radius.pill,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: space.xs,
   },
-  secondaryLabel: { fontSize: 14, fontWeight: "500" },
+  retryLabel: { fontSize: 14, fontWeight: "500" },
+  signOutBtn: {
+    height: 44,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: space.md,
+  },
+  signOutLabel: { fontSize: 13, fontWeight: "500" },
 });

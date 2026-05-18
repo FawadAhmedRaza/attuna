@@ -92,3 +92,31 @@ export async function postLink(input: {
     bearer: input.idToken,
   });
 }
+
+export interface Entry {
+  id: string;
+  body: string;
+  wordCount: number;
+  writtenAt: string; // ISO string from the server
+  createdAt: string;
+}
+
+export async function listEntries(): Promise<Entry[]> {
+  const { entries } = await request<{ entries: Entry[] }>("/api/entries", {
+    method: "GET",
+    authed: true,
+  });
+  return entries;
+}
+
+export async function createEntry(input: { body: string; writtenAt?: Date }): Promise<Entry> {
+  const { entry } = await request<{ entry: Entry }>("/api/entries", {
+    method: "POST",
+    authed: true,
+    body: {
+      body: input.body,
+      writtenAt: input.writtenAt ? input.writtenAt.toISOString() : undefined,
+    },
+  });
+  return entry;
+}
