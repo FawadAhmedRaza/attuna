@@ -18,9 +18,9 @@ Status legend:
 | Therapist portal | Next.js 15 (App Router, RSC by default)             | DECIDED  |
 | Mobile client    | Expo / React Native                                 | DECIDED  |
 | API              | Hono on AWS Lambda (HTTP) for MVP, Fargate at scale | PROPOSED |
-| Database         | Postgres on AWS RDS                                 | PROPOSED |
-| ORM              | Drizzle                                             | PROPOSED |
-| Auth             | AWS Cognito User Pools                              | PROPOSED |
+| Database         | Postgres on AWS RDS (Docker locally)                | DECIDED  |
+| ORM              | Drizzle                                             | DECIDED  |
+| Auth             | AWS Cognito User Pools                              | DECIDED  |
 | Storage (PHI)    | S3 with KMS-CMK envelope encryption                 | PROPOSED |
 | Email            | AWS SES                                             | PROPOSED |
 | AI inference     | AWS Bedrock (Anthropic Claude)                      | DECIDED  |
@@ -85,6 +85,16 @@ workspace_invite
   expires_at      timestamptz
   accepted_at     timestamptz (null)
   invited_by      uuid fk -> user
+
+workspace_survey                         -- onboarding metadata, no PHI, no RLS
+  workspace_id    uuid pk fk -> workspace (cascade)
+  license         text (null)            -- therapist credential, not PHI
+  practice_type   text                   -- 'solo' | 'group' | 'clinic' | 'training'
+  client_count    text (null)            -- '1-10' | '11-25' | '26-50' | '50+'
+  specialty       text[]                 -- e.g. ['Anxiety', 'Trauma']
+  priorities      text[]                 -- selected insight areas
+  created_at      timestamptz
+  updated_at      timestamptz
 ```
 
 Clinical entities (`client`, `entry`, `brief`, `suggestion`, `template`) all carry `workspace_id` and are protected by RLS.

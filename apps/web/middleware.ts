@@ -1,8 +1,22 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import {
+  ACTIVE_WS_COOKIE_NAME,
+  activeWorkspaceCookieOptions,
+  readActiveWorkspace,
+  signActiveWorkspace,
+} from "@/lib/auth/active-workspace";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
 
+const WORKSPACE_SLUG_PATTERN = /^\/w\/([^/]+)(?:\/|$)/;
+
 export async function middleware(req: NextRequest) {
+  const pathname = req.nextUrl.pathname;
+
+  // Therapist sessions only. The client journaling surface lives in
+  // `apps/mobile/` (M2.3b.3); the web `/c/[token]` page is
+  // informational and self-gates via the invite-token lookup, so
+  // middleware doesn't need to touch it.
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   const session = token ? await verifySessionToken(token) : null;
 
@@ -13,24 +27,28 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Refresh the atn_ws "last visited" cookie on workspace-scoped requests.
+  // Membership is NOT checked here — the gate layout does the real auth.
+  // We only persist what the user navigated to so /signin and / can default
+  // back to it later.
+  const match = pathname.match(WORKSPACE_SLUG_PATTERN);
+  if (match) {
+    const slug = match[1]!;
+    const current = await readActiveWorkspace(req.cookies.get(ACTIVE_WS_COOKIE_NAME)?.value);
+    if (current !== slug) {
+      const res = NextResponse.next();
+      const signed = await signActiveWorkspace(slug);
+      res.cookies.set({ ...activeWorkspaceCookieOptions(), value: signed });
+      return res;
+    }
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  // Protect onboarding + the authed portal routes (per ARCHITECTURE.md the
-  // portal lives at top-level paths, wrapped by the (portal) route group).
-  matcher: [
-    "/onboarding/:path*",
-    "/today/:path*",
-    "/clients/:path*",
-    "/suggestions/:path*",
-    "/templates/:path*",
-    "/assistant/:path*",
-    "/clinic/:path*",
-    "/audit/:path*",
-    "/integrations/:path*",
-    "/billing/:path*",
-    "/roles/:path*",
-    "/settings/:path*",
-  ],
+  // Protect onboarding, /account, and every workspace-scoped path.
+  // /c/[token] stays unmatched — the invite token IS the credential
+  // for the install-the-app landing.
+  matcher: ["/account/:path*", "/onboarding/:path*", "/w/:slug/:path*"],
 };

@@ -13,7 +13,7 @@ The minimum context and scaffolding so future sessions don't drift.
 - ✅ Monorepo scaffolded (pnpm + Turborepo, `apps/web`, `packages/ui`)
 - ✅ `CLAUDE.md`, `README.md`
 - 🔨 `ARCHITECTURE.md` — drafted, awaiting founder sign-off
-- ⏭ `HIPAA.md` — PHI handling rules, BAA inventory, audit log spec
+- ✅ `HIPAA.md` — PHI handling rules, BAA inventory, audit log spec (drafted at M2.0)
 - ⏭ `DESIGN_SYSTEM.md` — tokens, type scale, motion, light/dark
 - ⏭ `PROMPTS.md` — brief-generation prompts and eval criteria
 - ⏭ Initial git commit of scaffolding (currently zero commits on `main`)

@@ -1,0 +1,126 @@
+// Repo for client_user rows. In M2.3a these are created at /c/[token]
+// acceptance time and identified by a signed cookie (the cookie carries
+// the client_user_id directly). M2.3b will wire Cognito and start
+// populating `cognito_sub`.
+
+import { and, eq } from "drizzle-orm";
+
+import type { Database, Transaction, WorkspaceContext } from "../context";
+import { withWorkspaceContext } from "../context";
+import { clientUser, type ClientUser, type NewClientUser } from "../schema/client-user";
+
+export const clientUserRepo = {
+  /**
+   * Create (or fetch existing) a client_user row for a given client.
+   * Idempotent — if a row already exists for the client, return it.
+   * Use inside the invite-accept transaction so the create + the
+   * invite-accept audit row land atomically.
+   */
+  async createForInviteInTx(
+    tx: Transaction,
+    input: { workspaceId: string; clientId: string },
+  ): Promise<ClientUser> {
+    const existing = await tx
+      .select()
+      .from(clientUser)
+      .where(eq(clientUser.clientId, input.clientId))
+      .limit(1);
+    if (existing[0]) return existing[0];
+
+    const insertable: NewClientUser = {
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+      // cognito_sub stays null in M2.3a — populated by M2.3b once the
+      // client Cognito pool is wired.
+      cognitoSub: null,
+    };
+    const [created] = await tx.insert(clientUser).values(insertable).returning();
+    if (!created) {
+      throw new Error("Failed to create client_user");
+    }
+    return created;
+  },
+
+  /**
+   * Look up the row by its id. Used by the Bearer-token resolver
+   * (requireClientBearer) when the Cognito ID token carries our
+   * `custom:client_user_id` claim — we trust the claim only after
+   * verifying the row still exists and its cognito_sub matches the
+   * verified token's sub.
+   *
+   * Runs unscoped (no withWorkspaceContext) because the request
+   * hasn't established a workspace context yet; the row's
+   * workspace_id becomes the source of truth for downstream RLS
+   * once the sub match passes.
+   */
+  async findByIdUnscoped(db: Database, id: string): Promise<ClientUser | null> {
+    const rows = await db.select().from(clientUser).where(eq(clientUser.id, id)).limit(1);
+    return rows[0] ?? null;
+  },
+
+  /**
+   * Therapist-side lookup: does this client have a client_user row yet?
+   * Used to show "client has journaled" vs "client has not journaled"
+   * status on the client detail page. RLS-scoped.
+   */
+  async findForClient(
+    db: Database,
+    ctx: WorkspaceContext,
+    clientId: string,
+  ): Promise<ClientUser | null> {
+    return withWorkspaceContext(db, ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(clientUser)
+        .where(and(eq(clientUser.workspaceId, ctx.workspaceId), eq(clientUser.clientId, clientId)))
+        .limit(1);
+      return rows[0] ?? null;
+    });
+  },
+
+  /**
+   * Look up by Cognito sub. Used by the API once the mobile app starts
+   * sending Authorization: Bearer <Cognito ID token> — the server
+   * verifies the token, extracts `sub`, and resolves the
+   * client_user_id from this method.
+   *
+   * Unscoped (no workspace context) because the request hasn't proven
+   * a workspace yet; the row carries the workspace_id we then trust
+   * for downstream RLS.
+   */
+  async findByCognitoSubUnscoped(db: Database, cognitoSub: string): Promise<ClientUser | null> {
+    const rows = await db
+      .select()
+      .from(clientUser)
+      .where(eq(clientUser.cognitoSub, cognitoSub))
+      .limit(1);
+    return rows[0] ?? null;
+  },
+
+  /**
+   * Stamp the Cognito sub onto an existing client_user row. Idempotent
+   * when the sub matches; refuses to overwrite if a different sub is
+   * already set (prevents an attacker with a stolen invite token from
+   * stealing a client_user that already belongs to someone else's
+   * Cognito identity).
+   */
+  async setCognitoSubInTx(
+    tx: Transaction,
+    clientUserId: string,
+    cognitoSub: string,
+  ): Promise<void> {
+    const existing = await tx
+      .select({ cognitoSub: clientUser.cognitoSub })
+      .from(clientUser)
+      .where(eq(clientUser.id, clientUserId))
+      .limit(1);
+    const current = existing[0]?.cognitoSub;
+    if (current && current !== cognitoSub) {
+      throw new Error(
+        "client_user already linked to a different Cognito identity — refusing to overwrite",
+      );
+    }
+    if (current === cognitoSub) return; // already linked, idempotent.
+    await tx.update(clientUser).set({ cognitoSub }).where(eq(clientUser.id, clientUserId));
+  },
+};

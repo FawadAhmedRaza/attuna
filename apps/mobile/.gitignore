@@ -1,0 +1,12 @@
+# Expo / Metro generated
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native code / EAS Build artifacts (we use Expo Go in M2.3b.2; EAS arrives pre-beta)
+ios/
+android/
+
+# Build caches
+*.tsbuildinfo
