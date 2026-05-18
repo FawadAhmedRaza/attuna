@@ -42,16 +42,16 @@ export const clientUserRepo = {
   },
 
   /**
-   * Look up the row by its id. Used by the journal request path —
-   * the `atn_c` cookie carries this id, we verify the row still
-   * exists and matches the workspace_id the cookie claims.
+   * Look up the row by its id. Used by the Bearer-token resolver
+   * (requireClientBearer) when the Cognito ID token carries our
+   * `custom:client_user_id` claim — we trust the claim only after
+   * verifying the row still exists and its cognito_sub matches the
+   * verified token's sub.
    *
-   * Runs unscoped (no withWorkspaceContext) because the journal
-   * request hasn't established a workspace context yet; we use the
-   * cookie's workspace_id as the source of truth, but verify the
-   * row's workspace_id matches it. This sidesteps RLS for the
-   * lookup but the per-row check below catches a forged cookie
-   * pointing at the wrong workspace.
+   * Runs unscoped (no withWorkspaceContext) because the request
+   * hasn't established a workspace context yet; the row's
+   * workspace_id becomes the source of truth for downstream RLS
+   * once the sub match passes.
    */
   async findByIdUnscoped(db: Database, id: string): Promise<ClientUser | null> {
     const rows = await db.select().from(clientUser).where(eq(clientUser.id, id)).limit(1);

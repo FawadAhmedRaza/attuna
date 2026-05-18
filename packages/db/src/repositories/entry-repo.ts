@@ -186,10 +186,12 @@ export const entryRepo = {
 
   /**
    * Write a journal entry as the client themselves. Authorization is
-   * the `atn_c` cookie verified by the caller — we trust the
-   * (workspaceId, clientId, clientUserId) tuple as already proven by
-   * cookie signature validation. The audit row uses actor_role='client'
-   * with actor_user_id=null and the client_user_id in detail.
+   * a Cognito Bearer ID token verified by the caller (see
+   * requireClientBearer) — we trust the (workspaceId, clientId,
+   * clientUserId) tuple as already proven by token signature + sub
+   * match against client_user.cognito_sub. The audit row uses
+   * actor_role='client' with actor_user_id=null and the
+   * client_user_id in detail.
    */
   async createAsClient(
     db: Database,
@@ -242,7 +244,8 @@ export const entryRepo = {
 
   /**
    * List + decrypt entries for the client themselves. Same auth model
-   * as createAsClient — caller has already verified the atn_c cookie.
+   * as createAsClient — caller has already verified the Cognito Bearer
+   * ID token.
    */
   async listAsClient(
     db: Database,
