@@ -6,31 +6,17 @@ import {
   readActiveWorkspace,
   signActiveWorkspace,
 } from "@/lib/auth/active-workspace";
-import { CLIENT_SESSION_COOKIE_NAME, verifyClientSession } from "@/lib/auth/client-session";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
 
 const WORKSPACE_SLUG_PATTERN = /^\/w\/([^/]+)(?:\/|$)/;
-const JOURNAL_PATTERN = /^\/j(?:\/|$)/;
 
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
-  // ── Client journal surface (/j/*) uses a separate cookie (atn_c). ──
-  // Therapist sessions are unrelated here. A missing/invalid client
-  // session redirects to the home page rather than /signin (which is
-  // the therapist sign-in), since the patient's auth lives in the
-  // invite flow.
-  if (JOURNAL_PATTERN.test(pathname)) {
-    const c = await verifyClientSession(req.cookies.get(CLIENT_SESSION_COOKIE_NAME)?.value);
-    if (!c) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/";
-      return NextResponse.redirect(url);
-    }
-    return NextResponse.next();
-  }
-
-  // ── Therapist surfaces (everything else matched below). ───────────
+  // Therapist sessions only. The client journaling surface lives in
+  // `apps/mobile/` (M2.3b.3); the web `/c/[token]` page is
+  // informational and self-gates via the invite-token lookup, so
+  // middleware doesn't need to touch it.
   const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   const session = token ? await verifySessionToken(token) : null;
 
@@ -61,8 +47,8 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Protect onboarding, /account, every workspace-scoped path, and the
-  // client journal surface /j/*. /c/[token] stays unmatched — the
-  // invite token IS the credential for the accept page.
-  matcher: ["/account/:path*", "/onboarding/:path*", "/w/:slug/:path*", "/j/:path*"],
+  // Protect onboarding, /account, and every workspace-scoped path.
+  // /c/[token] stays unmatched — the invite token IS the credential
+  // for the install-the-app landing.
+  matcher: ["/account/:path*", "/onboarding/:path*", "/w/:slug/:path*"],
 };

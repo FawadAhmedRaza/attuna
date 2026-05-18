@@ -1,10 +1,9 @@
 // Server-only helper that resolves an Authorization: Bearer <Cognito
 // ID token> header into (workspaceId, clientId, clientUserId). The
-// M2.3c successor to `require-client.ts` — that one verified the
-// `atn_c` dev cookie, this one verifies a real Cognito session and
-// looks up the client_user via cognito_sub.
+// only auth path for client journaling — post-M2.3c the mobile app
+// is the sole journaling surface and every request carries a real
+// Cognito ID token.
 //
-// Used by every authenticated mobile request (M2.3b.3.C and beyond).
 // Returns null on any failure (token missing, invalid, expired, or
 // no linked client_user found); the route handler converts null to
 // 401 without leaking which step failed.

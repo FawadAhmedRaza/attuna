@@ -197,20 +197,21 @@ export const clientInviteRepo = {
         .set({ status: "active" })
         .where(eq(clientTable.id, lookup.clientId));
 
-      // Provision (or fetch) the client_user row that the cookie /
-      // Cognito sub will bind to. Idempotent: re-accepts of the same
-      // client (e.g. lost device + reinstall after a fresh invite)
-      // reuse the existing row rather than creating a parallel
-      // identity.
+      // Provision (or fetch) the client_user row that the Cognito sub
+      // will bind to. Idempotent: re-accepts of the same client (e.g.
+      // lost device + reinstall after a fresh invite) reuse the
+      // existing row rather than creating a parallel identity.
       const cu = await clientUserRepo.createForInviteInTx(tx, {
         workspaceId: lookup.workspaceId,
         clientId: lookup.clientId,
       });
 
-      // M2.3b.3 mobile path: if the caller passed a Cognito sub
-      // (because they already signed up + got an ID token), stamp it
-      // now in the same transaction as the invite consume. Web accept
-      // omits this — atn_c cookie carries the identity until M2.3c.
+      // Mobile is the only journaling surface (post-M2.3c). The
+      // caller has already signed up in the Cognito client pool and
+      // verified the ID token, so we stamp `cognito_sub` in the same
+      // transaction as the invite consume. `options.cognitoSub` is
+      // kept optional so tests can drive accept() without spinning
+      // up Cognito, but production code paths always pass it.
       if (options.cognitoSub) {
         await clientUserRepo.setCognitoSubInTx(tx, cu.id, options.cognitoSub);
       }

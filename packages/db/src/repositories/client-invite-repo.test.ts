@@ -143,9 +143,10 @@ describe("clientInviteRepo", () => {
     const result = await clientInviteRepo.accept(db, token);
     expect(result?.workspaceId).toBe(ws.id);
     expect(result?.clientId).toBe(c.id);
-    // M2.3a: accept also provisions a client_user row that the cookie
-    // will bind to. The id is returned so the action layer can sign it
-    // into the atn_c cookie.
+    // accept() also provisions a client_user row that the mobile
+    // /api/c/link path stamps `cognito_sub` onto. The id is returned
+    // so the route handler can call AdminUpdateUserAttributes with
+    // the matching custom:client_user_id claim.
     expect(result?.clientUserId).toMatch(/^[0-9a-f-]{36}$/);
 
     // Client is now active.

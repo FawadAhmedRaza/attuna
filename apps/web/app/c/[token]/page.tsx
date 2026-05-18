@@ -9,11 +9,25 @@ import { workspaceRepo } from "@attuna/db/repositories/workspace-repo";
 
 import { ThemeToggle } from "@/lib/ThemeToggle";
 
-import { AcceptInviteCard } from "./AcceptInviteCard";
+import { InstallAppCard } from "./InstallAppCard";
 
 export const metadata: Metadata = { title: "You're invited to journal" };
 
 type Props = { params: { token: string } };
+
+// `/c/[token]` is the human-readable invite landing. The invite is
+// consumed by the mobile app via /api/c/link (M2.3b.3) — not here.
+// This page:
+//   • Confirms the invite is still valid (so a stale link gives a
+//     friendly error rather than dumping an install CTA that won't
+//     work once the user installs).
+//   • Tells the invitee what to do: install the Attuna app, open
+//     the same link on their phone.
+//
+// The token NEVER leaves the URL — server-side rendering avoids
+// dropping it into client state, and the page contains no form that
+// posts it anywhere. The mobile app re-receives the token through
+// the deep link, not through anything this page emits.
 
 export default async function ClientInvitePage({ params }: Props) {
   const invite = await clientInviteRepo.findByToken(db(), params.token);
@@ -26,10 +40,6 @@ export default async function ClientInvitePage({ params }: Props) {
     );
   }
 
-  // Fetch supporting context for the welcome card — workspace name and
-  // the client's display_name. Both go through unscoped lookups (the
-  // visitor is anonymous). workspaceRepo.findByIdUnscoped was added in
-  // M2.1 for this kind of pre-context resolution.
   const ws = await workspaceRepo.findByIdUnscoped(db(), invite.workspaceId);
   if (!ws) {
     return (
@@ -39,10 +49,6 @@ export default async function ClientInvitePage({ params }: Props) {
     );
   }
 
-  // Pull the parent client's display_name through the same channel.
-  // RLS would normally guard `client`, but we already know the
-  // workspace_id from the invite and the access here is gated by the
-  // token itself, so we route through a small admin-tier method.
   const clientName = await clientRepo.findDisplayNameForInvite(
     db(),
     invite.workspaceId,
@@ -51,10 +57,10 @@ export default async function ClientInvitePage({ params }: Props) {
 
   return (
     <AuthShell themeToggle={<ThemeToggle />}>
-      <AcceptInviteCard
+      <InstallAppCard
         token={params.token}
         workspaceName={ws.name}
-        clientDisplayName={clientName ?? "your client"}
+        clientDisplayName={clientName ?? "you"}
         invitedEmail={invite.email}
       />
     </AuthShell>

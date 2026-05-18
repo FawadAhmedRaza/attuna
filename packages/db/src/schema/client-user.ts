@@ -1,9 +1,14 @@
-// Links a client (the patient) to their auth identity. In M2.3a there is
-// no Cognito client pool yet, so `cognito_sub` is nullable and the
-// `/c/[token]/accept` flow issues a signed `atn_c` cookie carrying the
-// client_user_id directly. M2.3b will populate `cognito_sub` and stop
-// trusting the cookie alone — the cookie becomes a thin wrapper around
-// a real Cognito identity at that point.
+// Links a client (the patient) to their auth identity. Post-M2.3c the
+// only journaling surface is the mobile app: it signs the user up in
+// the Cognito client pool, the `/api/c/link` route consumes the invite
+// and stamps `cognito_sub` here, and every subsequent journal request
+// authenticates with a Bearer ID token resolved against this row.
+//
+// `cognito_sub` stays nullable in the column definition because the
+// row is provisioned during invite acceptance and the sub lands a
+// moment later in the same request (see clientInviteRepo.accept +
+// clientUserRepo.setCognitoSubInTx). Rows without a sub are short-
+// lived intermediate state, not a supported logged-in form.
 //
 // One-to-one with client (`client_id UNIQUE`): a client represents a
 // single patient under a therapist's care, and a single auth identity
@@ -25,9 +30,9 @@ export const clientUser = pgTable(
     clientId: uuid("client_id")
       .notNull()
       .references(() => client.id, { onDelete: "cascade" }),
-    // Nullable in M2.3a — populated by M2.3b when the Cognito client
-    // pool is wired. UNIQUE so two clients can't claim the same Cognito
-    // identity.
+    // Nullable only for the brief window between row provisioning and
+    // /api/c/link stamping the sub in the same request. UNIQUE so two
+    // clients can't claim the same Cognito identity.
     cognitoSub: text("cognito_sub"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
